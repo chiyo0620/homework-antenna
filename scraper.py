@@ -73,7 +73,7 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # 【修正1】バッジの直属の行（li要素など）の中にある .ellipsisText のみをピンポイントで取得
+                    # バッジの直属の行レベルから正確な教科名を取得
                     parent_row = badge.locator("xpath=ancestor::li[1]")
                     if parent_row.count() == 0:
                         parent_row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or contains(@class, 'item')][1]")
@@ -93,7 +93,7 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 【修正2】現在画面に表示されている .coursePanel だけを抽出（裏で隠れている別教科のタスクを排除）
+                    # 現在画面上に表示されているパネルのみをピンポイント抽出
                     cards = page.locator(".coursePanel").filter(is_visible=True).all()
 
                     for card in cards:
@@ -102,7 +102,7 @@ def run():
                             continue
                         title = title_el.text_content().strip()
 
-                        # 期限の重複取得を防止し、正確なテキストを一つだけ取得
+                        # 締切日時の正確な取得（重複防止）
                         deadline = ""
                         status_el = card.locator(".submissionStatusText")
                         countdown_el = card.locator(".submissionCountDownText")
@@ -116,8 +116,8 @@ def run():
                         if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
                             continue
 
-                        # ノイズ除外
-                        if "のノート" in title or title.startswith("2026年") or "テスト直し" in title or "二学期2026" in title or "共有ノート" in title or "タイムライン" in title:
+                        # ノート履歴などのノイズ除外
+                        if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
                             continue
 
                         item_id = f"{subject_name}_{title}"
