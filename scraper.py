@@ -1,19 +1,7 @@
 import os
 import json
 import time
-import re
 from playwright.sync_api import sync_playwright
-
-def extract_deadline_and_title(text):
-    # 「今日 13:00」「明日 13:00」「9月9日(水) 13:00」などの日時パターンを正確に分離
-    pattern = r'(今日|明日|\d{1,2}月\d{1,2}日(?:\([月火水木金土日]\))?)\s*(\d{1,2}:\d{2})?'
-    match = re.search(pattern, text)
-    
-    if match:
-        deadline = match.group(0).strip()
-        title = text.replace(deadline, "").strip()
-        return title, deadline
-    return text, ""
 
 def run():
     school_id = os.environ.get("LOILO_SCHOOL_ID")
@@ -80,24 +68,19 @@ def run():
 
             for i in range(len(recruiting_badges)):
                 try:
+                    # 要素が再描画されるため都度取得
                     badges = page.get_by_text("募集中").all()
                     if i >= len(badges):
                         break
                     badge = badges[i]
                     
-                    # 教科名を正確に取得（通知の数字や「募集中」を取り除く）
-                    subject_el = badge.locator("xpath=ancestor::*[contains(@class, 'subject') or contains(@class, 'item') or self::li][1]")
-                    raw_text = subject_el.text_content() if subject_el.count() > 0 else ""
-                    
-                    lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
-                    subject_name = ""
-                    for line in lines:
-                        cleaned = re.sub(r'^\d+', '', line).replace("募集中", "").strip()
-                        if cleaned and not cleaned.isdigit():
-                            subject_name = cleaned
-                            break
-                    if not subject_name:
-                        subject_name = f"教科{i+1}"
+                    # 【修正1】ユーザー指定の正確なクラス名で教科名を取得
+                    parent_group = badge.locator("xpath=ancestor::*[contains(@class, 'roundListSectionGroup') or contains(@class, 'courseListBody')][1]")
+                    if parent_group.count() == 0:
+                        parent_group = badge.locator("xpath=ancestor::li[1]") # フォールバック
+                        
+                    subject_el = parent_group.locator(".ellipsisText").first
+                    subject_name = subject_el.text_content().strip() if subject_el.count() > 0 else f"教科{i+1}"
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     badge.click(force=True)
@@ -108,24 +91,34 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 提出箱パネル内のアイテム（タイトルと締切）を抽出
-                    cards = page.locator("div, a, li").filter(has_text=re.compile(r'明日|今日|\d{1,2}月\d{1,2}日')).all()
+                    # 【修正2】ユーザー指定のクラス名でタスクカードを探索
+                    cards = page.locator(".coursePanel").all()
 
                     for card in cards:
-                        if card.locator("div, a, li").filter(has_text=re.compile(r'明日|今日|\d{1,2}月\d{1,2}日')).count() > 1:
+                        # タスクの内容（タイトル）を取得
+                        title_el = card.locator(".ellipsisText").first
+                        if title_el.count() == 0:
+                            continue
+                        title = title_el.text_content().strip()
+
+                        # 締め切りの日時を取得（2つのクラスを結合）
+                        countdown_el = card.locator(".submissionCountDownText")
+                        status_el = card.locator(".submissionStatusText")
+
+                        deadline_parts = []
+                        if countdown_el.count() > 0:
+                            deadline_parts.append(countdown_el.first.text_content().strip())
+                        if status_el.count() > 0:
+                            deadline_parts.append(status_el.first.text_content().strip())
+                        
+                        deadline = " ".join(deadline_parts).strip()
+
+                        # 提出済みのものはスキップ
+                        card_text = card.text_content() or ""
+                        if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
                             continue
 
-                        text = card.text_content().strip()
-                        if len(text) > 150 or len(text) < 5:
-                            continue
-
-                        # タイトルと締切を自動分割
-                        title, deadline = extract_deadline_and_title(text)
-
-                        if not title:
-                            title = "宿題"
-
-                        # 過去のノイズ（ノート履歴など）を完全除外
+                        # ノート履歴などの不要なノイズを除外
                         if "のノート" in title or title.startswith("2026年") or "テスト直し" in title or "二学期2026" in title or "共有ノート" in title or "タイムライン" in title:
                             continue
 
