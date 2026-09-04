@@ -12,7 +12,7 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # 言語設定を日本語（ja-JP）に明示的に固定
+        # 日本語環境に固定
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
@@ -25,16 +25,17 @@ def run():
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
-            # 「Sign in with LoiLoNote」または「ロイロノートでログイン」ボタンをクリック
-            login_btn = (
-                page.query_selector("text='Sign in with LoiLoNote'") or
-                page.query_selector("text=/ロイロノート/") or
-                page.query_selector("button:has-text('LoiLoNote')")
-            )
+            # 画面上にすでに入力フォームが出ているか確認
+            inputs_count = len(page.query_selector_all("input"))
+            
+            if inputs_count < 2:
+                # 完全一致で「ロイロノートでログイン」ボタンを探してクリック
+                btn = page.get_by_text("ロイロノートでログイン", exact=True)
+                if not btn.is_visible():
+                    btn = page.get_by_text("Sign in with LoiLoNote", exact=True)
 
-            if login_btn:
-                print(f"ログインボタン『{login_btn.text_content().strip()}』をクリックします...")
-                login_btn.click()
+                print("「ロイロノートでログイン」ボタンをクリックします...")
+                btn.click()
                 time.sleep(2)
 
             # 2. 入力フォームの読み込み待ち
@@ -57,7 +58,6 @@ def run():
             # ログイン実行ボタンを押す
             submit_btn = (
                 page.query_selector("button:has-text('ログイン')") or 
-                page.query_selector("button:has-text('Sign in')") or 
                 page.query_selector("button[type='submit']") or 
                 page.query_selector("input[type='submit']")
             )
@@ -67,7 +67,7 @@ def run():
 
             # 3. ダッシュボード表示待ち
             print("ダッシュボード読み込み待ち...")
-            page.wait_for_selector(".left-pane, .subject-item, text=募集中, text=Recruiting", timeout=30000)
+            page.wait_for_selector(".left-pane, .subject-item, text=募集中", timeout=30000)
             print("★ ログイン成功！")
 
             # 4. 「募集中」教科の巡回・抽出
