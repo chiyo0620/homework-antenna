@@ -27,22 +27,18 @@ def run():
             # ブラウザ警告ポップアップ解除
             warning_overlay = page.query_selector("#continue")
             if warning_overlay and warning_overlay.is_visible():
-                print("ブラウザ警告ポップアップを解除します...")
                 warning_overlay.click(force=True)
                 time.sleep(1)
 
-            # 画面上に入力フォームがすでにあるか確認
+            # ログインフォーム入力
             visible_inputs = page.query_selector_all("input:not([type='hidden'])")
             if len(visible_inputs) < 2:
                 btn = page.get_by_text("ロイロノートでログイン", exact=True)
                 if not btn.is_visible():
                     btn = page.get_by_text("Sign in with LoiLoNote", exact=True)
-                print("「ロイロノートでログイン」ボタンをクリックします...")
                 btn.click(force=True)
                 time.sleep(2)
 
-            # 2. 入力フォームへ入力
-            print("入力フォームへ入力中...")
             page.wait_for_selector("input:not([type='hidden'])", timeout=20000)
             inputs = page.query_selector_all("input:not([type='hidden'])")
 
@@ -63,17 +59,16 @@ def run():
             )
             if submit_btn:
                 submit_btn.click(force=True)
-                print("ログイン送信ボタンを押しました。")
 
-            # 3. ダッシュボード表示待ち
+            # 2. ダッシュボード表示待ち
             print("ダッシュボード読み込み待ち...")
             page.wait_for_url("**/_/**", timeout=30000)
-            time.sleep(5)  # 画面構築待ち
-            print("★ ログイン＆ダッシュボード到達に成功しました！")
+            time.sleep(5)
+            print("★ ログイン完了")
 
-            # 4. 「募集中」要素の検索と巡回
+            # 3. 「募集中」バッジのある教科を巡回
             recruiting_badges = page.get_by_text("募集中").all()
-            print(f"検出された『募集中』バッジの数: {len(recruiting_badges)}")
+            print(f"検出された『募集中』教科の数: {len(recruiting_badges)}")
 
             for i in range(len(recruiting_badges)):
                 try:
@@ -82,30 +77,34 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # 親要素から教科名を取得
-                    parent = badge.locator("xpath=ancestor::*[contains(@class, 'subject') or contains(@class, 'item') or self::li or self::div][1]")
+                    # 教科名を取得
+                    parent = badge.locator("xpath=ancestor::*[contains(@class, 'subject') or self::li or self::div][1]")
                     subject_name = parent.text_content().replace("募集中", "").strip() if parent.count() > 0 else f"教科{i+1}"
+                    # 不要な数字や空白の整形
                     subject_name = " ".join(subject_name.split())
                     
-                    print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
+                    print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を確認中...")
                     badge.click(force=True)
                     time.sleep(3)
 
-                    # 提出箱の抽出
-                    boxes = page.locator("div, li, a").filter(has_text="締切").all()
-                    if not boxes:
-                        boxes = page.locator("[class*='submission'], [class*='box']").all()
+                    # 4. 右側パネルから「募集中」セクション内のアイテムを取得
+                    # 緑のチェックマーク（提出済み）が付いていない要素をすべて抽出
+                    items = page.locator("div, li, a").filter(has_text="22:00").all()
+                    if not items:
+                        items = page.locator("div, li, a").filter(has_text=":").all()
 
-                    for box in boxes:
-                        box_text = box.text_content().strip()
-                        if len(box_text) > 200 or len(box_text) < 3:
+                    for item in items:
+                        text = item.text_content().strip()
+                        # 余分な親要素の重複取得を防止（長すぎるテキストはスキップ）
+                        if len(text) > 150 or len(text) < 3:
                             continue
 
-                        lines = [line.strip() for line in box_text.split("\n") if line.strip()]
-                        if lines:
+                        lines = [line.strip() for line in text.split("\n") if line.strip()]
+                        if len(lines) >= 1:
                             title = lines[0]
                             deadline = lines[1] if len(lines) > 1 else ""
-                            
+
+                            # 重複追加防止
                             item_id = f"{subject_name}_{title}"
                             if not any(x.get("id") == item_id for x in unsubmitted_items):
                                 unsubmitted_items.append({
@@ -114,18 +113,13 @@ def run():
                                     "title": title,
                                     "deadline": deadline
                                 })
-                                print(f"  -> 未提出宿題を発見: {subject_name} - {title} ({deadline})")
+                                print(f"  └ 未提出タスク発見: {title} ({deadline})")
 
                 except Exception as ex:
-                    print(f"教科処理中のスキップ: {ex}")
+                    print(f"  └ スキップ: {ex}")
 
         except Exception as err:
-            print(f"\n--- [デバッグ情報] エラーが発生しました ---")
-            print(f"エラー内容: {err}")
-            print(f"エラー時のURL: {page.url}")
-            body_text = page.inner_text("body")[:300] if page.query_selector("body") else "No body"
-            print(f"画面上のテキスト抜粋:\n{body_text}")
-            print("-------------------------------------------\n")
+            print(f"エラー発生: {err}")
             raise err
 
         browser.close()
@@ -138,7 +132,7 @@ def run():
 
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    print(f"処理完了！合計 {len(unsubmitted_items)} 件の未提出宿題を抽出しました。data.json を更新します。")
+    print(f"★ 完了！ {len(unsubmitted_items)} 件の未提出宿題を取得・保存しました。")
 
 if __name__ == "__main__":
     run()
