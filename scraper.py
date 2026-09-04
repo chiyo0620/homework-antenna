@@ -4,45 +4,36 @@ import time
 from playwright.sync_api import sync_playwright
 
 def run():
-    # Googleアカウント（メールアドレス）とパスワードを取得
+    # Secretsから環境変数を取得
+    school_id = os.environ.get("LOILO_SCHOOL_ID")
     user_id = os.environ.get("LOILO_USER_ID")
     password = os.environ.get("LOILO_PASSWORD")
 
     unsubmitted_items = []
 
     with sync_playwright() as p:
-        # Googleの自動ログインブロックを回避するための設定
-        browser = p.chromium.launch(
-            headless=True,
-            args=['--disable-blink-features=AutomationControlled']
-        )
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 800})
         page = context.new_page()
 
         # 1. ロイロノートWeb版へアクセス
         page.goto("https://loilonote.app")
-        page.wait_for_selector("text=Googleでログイン", timeout=15000)
         
-        # 2. 「Googleでログイン」をクリック
-        page.click("text=Googleでログイン")
+        # 「ロイロノートでログイン」ボタンをクリック
+        page.wait_for_selector("text=ロイロノートでログイン", timeout=15000)
+        page.click("text=ロイロノートでログイン")
 
-        # 3. Googleメールアドレス入力
-        page.wait_for_selector("input[type='email']", timeout=15000)
-        page.fill("input[type='email']", user_id)
-        page.click("#identifierNext")
+        # 2. 学校ID・ユーザーID・パスワードを入力してログイン
+        page.wait_for_selector("input[placeholder*='学校ID']", timeout=15000)
+        page.fill("input[placeholder*='学校ID']", school_id)
+        page.fill("input[placeholder*='ユーザーID']", user_id)
+        page.fill("input[placeholder*='パスワード']", password)
+        page.click("button:has-text('ログイン')")
 
-        # 4. Googleパスワード入力
-        page.wait_for_selector("input[type='password']", timeout=15000)
-        page.fill("input[type='password']", password)
-        page.click("#passwordNext")
-
-        # 5. ロイロノートのダッシュボード読込待ち
+        # 3. ダッシュボード読込待ち
         page.wait_for_selector(".left-pane", timeout=30000)
 
-        # 6. 「募集中」バッジのある教科を巡回
+        # 4. 「募集中」バッジのある教科を巡回
         recruiting_elements = page.query_selector_all("text=募集中")
 
         for elem in recruiting_elements:
@@ -52,7 +43,7 @@ def run():
             elem.click()
             time.sleep(2)
 
-            # 7. 未提出の提出箱を抽出（緑色のチェックマークが付いていないもの）
+            # 5. 未提出の提出箱を抽出（緑色のチェックマークが付いていないもの）
             boxes = page.query_selector_all(".submission-box-item")
             for box in boxes:
                 is_submitted = box.query_selector(".icon-check-green, [data-status='submitted']")
