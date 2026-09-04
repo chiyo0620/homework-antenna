@@ -135,7 +135,6 @@
   <main id="container"></main>
 
   <script>
-    // 「明日 22:00」や「9月9日(水) 22:00」を解析する関数
     function parseDeadline(str) {
       if (!str) return new Date(8640000000000000);
       const now = new Date();
@@ -144,7 +143,11 @@
       let day = now.getDate();
       let hour = 23, minute = 59;
 
-      if (str.includes("明日")) {
+      if (str.includes("今日")) {
+        year = now.getFullYear();
+        month = now.getMonth();
+        day = now.getDate();
+      } else if (str.includes("明日")) {
         const tomorrow = new Date(now.getTime() + (24 * 60 * 60 * 1000));
         year = tomorrow.getFullYear();
         month = tomorrow.getMonth();
