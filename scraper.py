@@ -1,7 +1,19 @@
 import os
 import json
 import time
+import re
 from playwright.sync_api import sync_playwright
+
+def extract_deadline_and_title(text):
+    # 「今日 13:00」「明日 13:00」「9月9日(水) 13:00」などの日時パターンを検出
+    pattern = r'(今日|明日|\d{1,2}月\d{1,2}日(?:\([月火水木金土日]\))?)\s*(\d{1,2}:\d{2})?'
+    match = re.search(pattern, text)
+    
+    if match:
+        deadline = match.group(0).strip()
+        title = text.replace(deadline, "").strip()
+        return title, deadline
+    return text, ""
 
 def run():
     school_id = os.environ.get("LOILO_SCHOOL_ID")
@@ -77,61 +89,47 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # 教科名を取得（数字や「募集中」を除去して正確な名称を抽出）
+                    # 教科名を取得（「1募集中」などの先頭数字や「募集中」を除去）
                     parent_element = badge.locator("xpath=ancestor::*[contains(@class, 'item') or self::li or self::div][1]")
                     full_text = parent_element.text_content() if parent_element.count() > 0 else f"教科{i+1}"
                     
-                    lines = [line.strip() for line in full_text.split('\n') if line.strip()]
-                    cleaned_name = ""
-                    for line in lines:
-                        if line != "募集中" and not line.isdigit():
-                            cleaned_name = line
-                            break
+                    raw_name = full_text.replace("募集中", "").strip()
+                    cleaned_name = re.sub(r'^\d+', '', raw_name).strip()
                     subject_name = cleaned_name if cleaned_name else f"教科{i+1}"
                     
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     badge.click(force=True)
                     time.sleep(3)
 
-                    # 上部に「提出箱」タブがあればクリック
-                    submission_tab = page.get_by_text("提出箱")
-                    if submission_tab.count() > 0 and submission_tab.first.is_visible():
-                        submission_tab.first.click(force=True)
-                        time.sleep(2)
+                    # 日時が含まれるタスク要素を検索
+                    cards = page.locator("div, a, li").filter(has_text=re.compile(r'今日|明日|\d{1,2}月\d{1,2}日')).all()
 
-                    # 4. 「募集中」セクション内のカード要素をピンポイント抽出
-                    boxes = page.locator("div, a, li").filter(has_text=":").all()
-
-                    # 重複・広域親要素を除外し、適切な長さの要素だけを採択
-                    valid_cards = []
-                    for b in boxes:
-                        text = b.text_content().strip()
-                        if 10 <= len(text) <= 120:
-                            child_matches = b.locator("div, a, li").filter(has_text=":").count()
-                            if child_matches <= 1:
-                                valid_cards.append(b)
-
-                    for card in valid_cards:
+                    for card in cards:
                         card_text = card.text_content().strip()
-                        lines = [line.strip() for line in card_text.split('\n') if line.strip()]
-                        
-                        if len(lines) >= 1:
-                            title = lines[0]
-                            deadline = lines[1] if len(lines) > 1 else ""
+                        if len(card_text) > 150 or len(card_text) < 5:
+                            continue
 
-                            # 余計なシステムテキストを排除
-                            if any(k in title for k in ["共有ノート", "タイムライン", "新しいノート", "ノート1"]):
-                                continue
+                        # 重複する親要素を回避
+                        if card.locator("div, a, li").filter(has_text=re.compile(r'今日|明日|\d{1,2}月\d{1,2}日')).count() > 1:
+                            continue
 
-                            item_id = f"{subject_name}_{title}"
-                            if not any(x.get("id") == item_id for x in unsubmitted_items):
-                                unsubmitted_items.append({
-                                    "id": item_id,
-                                    "subject": subject_name,
-                                    "title": title,
-                                    "deadline": deadline
-                                })
-                                print(f"  └ 未提出タスク発見: [{subject_name}] {title} ({deadline})")
+                        # タイトルと締切を分断・抽出
+                        title, deadline = extract_deadline_and_title(card_text)
+
+                        if not title and not deadline:
+                            continue
+                        if not title:
+                            title = "宿題"
+
+                        item_id = f"{subject_name}_{title}"
+                        if not any(x.get("id") == item_id for x in unsubmitted_items):
+                            unsubmitted_items.append({
+                                "id": item_id,
+                                "subject": subject_name,
+                                "title": title,
+                                "deadline": deadline
+                            })
+                            print(f"  └ 未提出タスク発見: [{subject_name}] {title} / 締切: {deadline}")
 
                 except Exception as ex:
                     print(f"  └ スキップ: {ex}")
