@@ -177,7 +177,9 @@
         const res = await fetch('./data.json?t=' + Date.now());
         const data = await res.json();
 
-        document.getElementById('updatedAt').textContent = '最終更新: ' + data.updated_at;
+       const utcDate = new Date(data.updated_at.replace(" ", "T") + "Z");
+       const jstString = utcDate.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+       document.getElementById('updatedAt').textContent = '最終更新: ' + jstString;
         const container = document.getElementById('container');
         container.innerHTML = '';
 
