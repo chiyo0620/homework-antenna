@@ -12,11 +12,11 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # 日本語環境に固定
+        # 最新バージョンのUser-Agentを設定して警告ポップアップ発生を回避
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         )
         page = context.new_page()
 
@@ -25,17 +25,24 @@ def run():
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
+            # ブラウザ警告ポップアップ（#continue）が表示されていれば解除
+            warning_overlay = page.query_selector("#continue")
+            if warning_overlay and warning_overlay.is_visible():
+                print("ブラウザ警告ポップアップを解除します...")
+                warning_overlay.click(force=True)
+                time.sleep(1)
+
             # 画面上にすでに入力フォームが出ているか確認
             inputs_count = len(page.query_selector_all("input"))
             
             if inputs_count < 2:
-                # 完全一致で「ロイロノートでログイン」ボタンを探してクリック
                 btn = page.get_by_text("ロイロノートでログイン", exact=True)
                 if not btn.is_visible():
                     btn = page.get_by_text("Sign in with LoiLoNote", exact=True)
 
                 print("「ロイロノートでログイン」ボタンをクリックします...")
-                btn.click()
+                # force=True で要素の重なりを無視して強制クリック
+                btn.click(force=True)
                 time.sleep(2)
 
             # 2. 入力フォームの読み込み待ち
@@ -62,7 +69,7 @@ def run():
                 page.query_selector("input[type='submit']")
             )
             if submit_btn:
-                submit_btn.click()
+                submit_btn.click(force=True)
                 print("ログイン送信ボタンを押しました。")
 
             # 3. ダッシュボード表示待ち
@@ -78,7 +85,7 @@ def run():
                 parent_subject = elem.evaluate("node => node.closest('.subject-item, li, div')")
                 subject_name = parent_subject.text_content().replace("募集中", "").strip() if parent_subject else "教科"
 
-                elem.click()
+                elem.click(force=True)
                 time.sleep(2)
 
                 boxes = page.query_selector_all(".submission-box-item")
