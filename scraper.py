@@ -24,32 +24,27 @@ def run():
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
-            # ブラウザ警告ポップアップ（#continue）が表示されていれば解除
+            # ブラウザ警告ポップアップ解除
             warning_overlay = page.query_selector("#continue")
             if warning_overlay and warning_overlay.is_visible():
                 print("ブラウザ警告ポップアップを解除します...")
                 warning_overlay.click(force=True)
                 time.sleep(1)
 
-            # 画面上に画面表示用の入力フォームがすでにあるか確認
+            # 画面上に入力フォームがすでにあるか確認
             visible_inputs = page.query_selector_all("input:not([type='hidden'])")
-            
             if len(visible_inputs) < 2:
                 btn = page.get_by_text("ロイロノートでログイン", exact=True)
                 if not btn.is_visible():
                     btn = page.get_by_text("Sign in with LoiLoNote", exact=True)
-
                 print("「ロイロノートでログイン」ボタンをクリックします...")
                 btn.click(force=True)
                 time.sleep(2)
 
-            # 2. 画面に表示されている入力フォームの読み込み待ち
-            print("入力フォームを探しています...")
+            # 2. 入力フォームへ入力
+            print("入力フォームへ入力中...")
             page.wait_for_selector("input:not([type='hidden'])", timeout=20000)
-
-            # 表示中の入力欄を取得
             inputs = page.query_selector_all("input:not([type='hidden'])")
-            print(f"表示中の入力欄（input）を {len(inputs)} 個検出しました。")
 
             school_input = page.query_selector("input[placeholder*='学校']") or (inputs[0] if len(inputs) > 0 else None)
             user_input = page.query_selector("input[placeholder*='ユーザー']") or (inputs[1] if len(inputs) > 1 else None)
@@ -59,9 +54,7 @@ def run():
                 school_input.fill(school_id)
                 user_input.fill(user_id)
                 pass_input.fill(password)
-                print("ログイン情報を入力しました。")
 
-            # ログイン実行ボタンを押す
             submit_btn = (
                 page.query_selector("button:has-text('ログイン')") or 
                 page.query_selector("input[type='submit']") or 
@@ -74,32 +67,57 @@ def run():
 
             # 3. ダッシュボード表示待ち
             print("ダッシュボード読み込み待ち...")
-            page.wait_for_selector(".left-pane, .subject-item, text=募集中", timeout=30000)
-            print("★ ログイン成功！")
+            page.wait_for_url("**/_/**", timeout=30000)
+            time.sleep(5)  # 画面構築待ち
+            print("★ ログイン＆ダッシュボード到達に成功しました！")
 
-            # 4. 「募集中」教科の巡回・抽出
-            recruiting_elements = page.query_selector_all("text=募集中")
-            print(f"募集中の教科数: {len(recruiting_elements)}")
+            # 4. 「募集中」要素の検索と巡回
+            recruiting_badges = page.get_by_text("募集中").all()
+            print(f"検出された『募集中』バッジの数: {len(recruiting_badges)}")
 
-            for elem in recruiting_elements:
-                parent_subject = elem.evaluate("node => node.closest('.subject-item, li, div')")
-                subject_name = parent_subject.text_content().replace("募集中", "").strip() if parent_subject else "教科"
+            for i in range(len(recruiting_badges)):
+                try:
+                    badges = page.get_by_text("募集中").all()
+                    if i >= len(badges):
+                        break
+                    badge = badges[i]
+                    
+                    # 親要素から教科名を取得
+                    parent = badge.locator("xpath=ancestor::*[contains(@class, 'subject') or contains(@class, 'item') or self::li or self::div][1]")
+                    subject_name = parent.text_content().replace("募集中", "").strip() if parent.count() > 0 else f"教科{i+1}"
+                    subject_name = " ".join(subject_name.split())
+                    
+                    print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
+                    badge.click(force=True)
+                    time.sleep(3)
 
-                elem.click(force=True)
-                time.sleep(2)
+                    # 提出箱の抽出
+                    boxes = page.locator("div, li, a").filter(has_text="締切").all()
+                    if not boxes:
+                        boxes = page.locator("[class*='submission'], [class*='box']").all()
 
-                boxes = page.query_selector_all(".submission-box-item")
-                for box in boxes:
-                    is_submitted = box.query_selector(".icon-check-green, [data-status='submitted']")
-                    if not is_submitted:
-                        title = box.query_selector(".title").text_content().strip() if box.query_selector(".title") else "宿題"
-                        deadline = box.query_selector(".deadline").text_content().strip() if box.query_selector(".deadline") else ""
-                        
-                        unsubmitted_items.append({
-                            "subject": subject_name,
-                            "title": title,
-                            "deadline": deadline
-                        })
+                    for box in boxes:
+                        box_text = box.text_content().strip()
+                        if len(box_text) > 200 or len(box_text) < 3:
+                            continue
+
+                        lines = [line.strip() for line in box_text.split("\n") if line.strip()]
+                        if lines:
+                            title = lines[0]
+                            deadline = lines[1] if len(lines) > 1 else ""
+                            
+                            item_id = f"{subject_name}_{title}"
+                            if not any(x.get("id") == item_id for x in unsubmitted_items):
+                                unsubmitted_items.append({
+                                    "id": item_id,
+                                    "subject": subject_name,
+                                    "title": title,
+                                    "deadline": deadline
+                                })
+                                print(f"  -> 未提出宿題を発見: {subject_name} - {title} ({deadline})")
+
+                except Exception as ex:
+                    print(f"教科処理中のスキップ: {ex}")
 
         except Exception as err:
             print(f"\n--- [デバッグ情報] エラーが発生しました ---")
@@ -120,7 +138,7 @@ def run():
 
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    print("データ保存完了!")
+    print(f"処理完了！合計 {len(unsubmitted_items)} 件の未提出宿題を抽出しました。data.json を更新します。")
 
 if __name__ == "__main__":
     run()
