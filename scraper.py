@@ -68,19 +68,21 @@ def run():
 
             for i in range(len(recruiting_badges)):
                 try:
-                    # 要素が再描画されるため都度取得
                     badges = page.get_by_text("募集中").all()
                     if i >= len(badges):
                         break
                     badge = badges[i]
                     
-                    # 【修正1】ユーザー指定の正確なクラス名で教科名を取得
-                    parent_group = badge.locator("xpath=ancestor::*[contains(@class, 'roundListSectionGroup') or contains(@class, 'courseListBody')][1]")
-                    if parent_group.count() == 0:
-                        parent_group = badge.locator("xpath=ancestor::li[1]") # フォールバック
-                        
-                    subject_el = parent_group.locator(".ellipsisText").first
-                    subject_name = subject_el.text_content().strip() if subject_el.count() > 0 else f"教科{i+1}"
+                    # 【修正1】バッジの直属の行（li要素など）の中にある .ellipsisText のみをピンポイントで取得
+                    parent_row = badge.locator("xpath=ancestor::li[1]")
+                    if parent_row.count() == 0:
+                        parent_row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or contains(@class, 'item')][1]")
+                    
+                    subject_el = parent_row.locator(".ellipsisText").first
+                    if subject_el.count() > 0:
+                        subject_name = subject_el.text_content().strip()
+                    else:
+                        subject_name = f"教科{i+1}"
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     badge.click(force=True)
@@ -91,34 +93,30 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 【修正2】ユーザー指定のクラス名でタスクカードを探索
-                    cards = page.locator(".coursePanel").all()
+                    # 【修正2】現在画面に表示されている .coursePanel だけを抽出（裏で隠れている別教科のタスクを排除）
+                    cards = page.locator(".coursePanel").filter(is_visible=True).all()
 
                     for card in cards:
-                        # タスクの内容（タイトル）を取得
                         title_el = card.locator(".ellipsisText").first
                         if title_el.count() == 0:
                             continue
                         title = title_el.text_content().strip()
 
-                        # 締め切りの日時を取得（2つのクラスを結合）
-                        countdown_el = card.locator(".submissionCountDownText")
+                        # 期限の重複取得を防止し、正確なテキストを一つだけ取得
+                        deadline = ""
                         status_el = card.locator(".submissionStatusText")
-
-                        deadline_parts = []
-                        if countdown_el.count() > 0:
-                            deadline_parts.append(countdown_el.first.text_content().strip())
-                        if status_el.count() > 0:
-                            deadline_parts.append(status_el.first.text_content().strip())
+                        countdown_el = card.locator(".submissionCountDownText")
                         
-                        deadline = " ".join(deadline_parts).strip()
+                        if status_el.count() > 0 and status_el.first.is_visible():
+                            deadline = status_el.first.text_content().strip()
+                        elif countdown_el.count() > 0 and countdown_el.first.is_visible():
+                            deadline = countdown_el.first.text_content().strip()
 
-                        # 提出済みのものはスキップ
                         card_text = card.text_content() or ""
                         if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
                             continue
 
-                        # ノート履歴などの不要なノイズを除外
+                        # ノイズ除外
                         if "のノート" in title or title.startswith("2026年") or "テスト直し" in title or "二学期2026" in title or "共有ノート" in title or "タイムライン" in title:
                             continue
 
