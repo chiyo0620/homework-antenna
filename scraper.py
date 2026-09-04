@@ -2,18 +2,8 @@ import os
 import json
 import time
 import re
+from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
-
-def extract_deadline_and_title(text):
-    # 「今日 13:00」「明日 13:00」「9月9日(水) 13:00」などの日時パターンを検出
-    pattern = r'(今日|明日|\d{1,2}月\d{1,2}日(?:\([月火水木金土日]\))?)\s*(\d{1,2}:\d{2})?'
-    match = re.search(pattern, text)
-    
-    if match:
-        deadline = match.group(0).strip()
-        title = text.replace(deadline, "").strip()
-        return title, deadline
-    return text, ""
 
 def run():
     school_id = os.environ.get("LOILO_SCHOOL_ID")
@@ -42,7 +32,7 @@ def run():
                 warning_overlay.click(force=True)
                 time.sleep(1)
 
-            # ログインフォーム入力
+            # ログイン処理
             visible_inputs = page.query_selector_all("input:not([type='hidden'])")
             if len(visible_inputs) < 2:
                 btn = page.get_by_text("ロイロノートでログイン", exact=True)
@@ -72,13 +62,12 @@ def run():
             if submit_btn:
                 submit_btn.click(force=True)
 
-            # 2. ダッシュボード表示待ち
             print("ダッシュボード読み込み待ち...")
             page.wait_for_url("**/_/**", timeout=30000)
             time.sleep(5)
             print("★ ログイン完了")
 
-            # 3. 「募集中」バッジのある教科を巡回
+            # 左サイドバーの「募集中」教科を特定
             recruiting_badges = page.get_by_text("募集中").all()
             print(f"検出された『募集中』教科の数: {len(recruiting_badges)}")
 
@@ -89,47 +78,58 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # 教科名を取得（「1募集中」などの先頭数字や「募集中」を除去）
-                    parent_element = badge.locator("xpath=ancestor::*[contains(@class, 'item') or self::li or self::div][1]")
-                    full_text = parent_element.text_content() if parent_element.count() > 0 else f"教科{i+1}"
+                    # 教科名を正確に取得（通知の数字や「募集中」を取り除く）
+                    subject_el = badge.locator("xpath=ancestor::*[contains(@class, 'subject') or contains(@class, 'item') or self::li][1]")
+                    raw_text = subject_el.text_content() if subject_el.count() > 0 else ""
                     
-                    raw_name = full_text.replace("募集中", "").strip()
-                    cleaned_name = re.sub(r'^\d+', '', raw_name).strip()
-                    subject_name = cleaned_name if cleaned_name else f"教科{i+1}"
-                    
+                    lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+                    subject_name = ""
+                    for line in lines:
+                        cleaned = re.sub(r'^\d+', '', line).replace("募集中", "").strip()
+                        if cleaned and not cleaned.isdigit():
+                            subject_name = cleaned
+                            break
+                    if not subject_name:
+                        subject_name = f"教科{i+1}"
+
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     badge.click(force=True)
                     time.sleep(3)
 
-                    # 日時が含まれるタスク要素を検索
-                    cards = page.locator("div, a, li").filter(has_text=re.compile(r'今日|明日|\d{1,2}月\d{1,2}日')).all()
+                    # 提出箱タブをクリックして確実に表示
+                    tab = page.get_by_text("提出箱")
+                    if tab.count() > 0 and tab.first.is_visible():
+                        tab.first.click(force=True)
+                        time.sleep(2)
+
+                    # 提出箱パネル内のアイテム（タイトルと締切）をピンポイント抽出
+                    cards = page.locator("div, a, li").filter(has_text=re.compile(r'明日|今日|\d{1,2}月\d{1,2}日')).all()
 
                     for card in cards:
-                        card_text = card.text_content().strip()
-                        if len(card_text) > 150 or len(card_text) < 5:
+                        # 最小単位のカード要素のみを対象とする（余計な親要素を除外）
+                        if card.locator("div, a, li").filter(has_text=re.compile(r'明日|今日|\d{1,2}月\d{1,2}日')).count() > 1:
                             continue
 
-                        # 重複する親要素を回避
-                        if card.locator("div, a, li").filter(has_text=re.compile(r'今日|明日|\d{1,2}月\d{1,2}日')).count() > 1:
-                            continue
+                        text = card.text_content().strip()
+                        card_lines = [l.strip() for l in text.split('\n') if l.strip()]
 
-                        # タイトルと締切を分断・抽出
-                        title, deadline = extract_deadline_and_title(card_text)
+                        if len(card_lines) >= 2:
+                            title = card_lines[0]
+                            deadline = card_lines[1]
 
-                        if not title and not deadline:
-                            continue
-                        if not title:
-                            title = "宿題"
+                            # 雑多なノート履歴テキストを完全除外
+                            if "のノート" in title or title.startswith("2026年") or "テスト直し2026" in title or "二学期2026" in title:
+                                continue
 
-                        item_id = f"{subject_name}_{title}"
-                        if not any(x.get("id") == item_id for x in unsubmitted_items):
-                            unsubmitted_items.append({
-                                "id": item_id,
-                                "subject": subject_name,
-                                "title": title,
-                                "deadline": deadline
-                            })
-                            print(f"  └ 未提出タスク発見: [{subject_name}] {title} / 締切: {deadline}")
+                            item_id = f"{subject_name}_{title}"
+                            if not any(x.get("id") == item_id for x in unsubmitted_items):
+                                unsubmitted_items.append({
+                                    "id": item_id,
+                                    "subject": subject_name,
+                                    "title": title,
+                                    "deadline": deadline
+                                })
+                                print(f"  └ 【成果物】 [{subject_name}] {title} / 締切: {deadline}")
 
                 except Exception as ex:
                     print(f"  └ スキップ: {ex}")
@@ -148,7 +148,7 @@ def run():
 
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    print(f"★ 完了！ {len(unsubmitted_items)} 件の未提出宿題を取得・保存しました。")
+    print(f"★ 完了！ {len(unsubmitted_items)} 件の未提出宿題を抽出しました。")
 
 if __name__ == "__main__":
     run()
