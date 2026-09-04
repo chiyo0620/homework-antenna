@@ -77,34 +77,52 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # 教科名を取得
-                    parent = badge.locator("xpath=ancestor::*[contains(@class, 'subject') or self::li or self::div][1]")
-                    subject_name = parent.text_content().replace("募集中", "").strip() if parent.count() > 0 else f"教科{i+1}"
-                    # 不要な数字や空白の整形
-                    subject_name = " ".join(subject_name.split())
+                    # 教科名を取得（数字や「募集中」を除去して正確な名称を抽出）
+                    parent_element = badge.locator("xpath=ancestor::*[contains(@class, 'item') or self::li or self::div][1]")
+                    full_text = parent_element.text_content() if parent_element.count() > 0 else f"教科{i+1}"
                     
-                    print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を確認中...")
+                    lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+                    cleaned_name = ""
+                    for line in lines:
+                        if line != "募集中" and not line.isdigit():
+                            cleaned_name = line
+                            break
+                    subject_name = cleaned_name if cleaned_name else f"教科{i+1}"
+                    
+                    print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     badge.click(force=True)
                     time.sleep(3)
 
-                    # 4. 右側パネルから「募集中」セクション内のアイテムを取得
-                    # 緑のチェックマーク（提出済み）が付いていない要素をすべて抽出
-                    items = page.locator("div, li, a").filter(has_text="22:00").all()
-                    if not items:
-                        items = page.locator("div, li, a").filter(has_text=":").all()
+                    # 上部に「提出箱」タブがあればクリック
+                    submission_tab = page.get_by_text("提出箱")
+                    if submission_tab.count() > 0 and submission_tab.first.is_visible():
+                        submission_tab.first.click(force=True)
+                        time.sleep(2)
 
-                    for item in items:
-                        text = item.text_content().strip()
-                        # 余分な親要素の重複取得を防止（長すぎるテキストはスキップ）
-                        if len(text) > 150 or len(text) < 3:
-                            continue
+                    # 4. 「募集中」セクション内のカード要素をピンポイント抽出
+                    boxes = page.locator("div, a, li").filter(has_text=":").all()
 
-                        lines = [line.strip() for line in text.split("\n") if line.strip()]
+                    # 重複・広域親要素を除外し、適切な長さの要素だけを採択
+                    valid_cards = []
+                    for b in boxes:
+                        text = b.text_content().strip()
+                        if 10 <= len(text) <= 120:
+                            child_matches = b.locator("div, a, li").filter(has_text=":").count()
+                            if child_matches <= 1:
+                                valid_cards.append(b)
+
+                    for card in valid_cards:
+                        card_text = card.text_content().strip()
+                        lines = [line.strip() for line in card_text.split('\n') if line.strip()]
+                        
                         if len(lines) >= 1:
                             title = lines[0]
                             deadline = lines[1] if len(lines) > 1 else ""
 
-                            # 重複追加防止
+                            # 余計なシステムテキストを排除
+                            if any(k in title for k in ["共有ノート", "タイムライン", "新しいノート", "ノート1"]):
+                                continue
+
                             item_id = f"{subject_name}_{title}"
                             if not any(x.get("id") == item_id for x in unsubmitted_items):
                                 unsubmitted_items.append({
@@ -113,7 +131,7 @@ def run():
                                     "title": title,
                                     "deadline": deadline
                                 })
-                                print(f"  └ 未提出タスク発見: {title} ({deadline})")
+                                print(f"  └ 未提出タスク発見: [{subject_name}] {title} ({deadline})")
 
                 except Exception as ex:
                     print(f"  └ スキップ: {ex}")
