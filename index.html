@@ -177,7 +177,7 @@
         const res = await fetch('./data.json?t=' + Date.now());
         const data = await res.json();
 
-        // 日本時間表記
+        // 日本時間表示への変換
         const utcDate = new Date(data.updated_at.replace(" ", "T") + "Z");
         const jstString = utcDate.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
         document.getElementById('updatedAt').textContent = '最終更新: ' + jstString;
@@ -198,9 +198,8 @@
         const now = new Date();
         const tomorrow15 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0);
         const threeDaysLater = new Date(now.getTime() + (3 * 24 * 60 * 60 * 1000));
-        const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)); // 30日前
+        const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
 
-        // 解析およびカテゴリー分類
         let items = data.items.map(item => {
           const d = parseDeadline(item.deadline);
           let category = 'normal';
@@ -216,7 +215,7 @@
           return { ...item, dateObj: d, category };
         });
 
-        // 【追加】30日以上前の過去の古すぎる課題は自動排除
+        // 30日以上前の古い過剰データのみ除外
         items = items.filter(i => i.dateObj >= thirtyDaysAgo);
 
         if (items.length === 0) {
@@ -229,7 +228,7 @@
           return;
         }
 
-        // 締切順ソート
+        // 締切順にソート
         items.sort((a, b) => a.dateObj - b.dateObj);
 
         const categories = [
