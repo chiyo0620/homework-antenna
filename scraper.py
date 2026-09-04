@@ -2,8 +2,18 @@ import os
 import json
 import time
 import re
-from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
+
+def extract_deadline_and_title(text):
+    # 「今日 13:00」「明日 13:00」「9月9日(水) 13:00」などの日時パターンを正確に分離
+    pattern = r'(今日|明日|\d{1,2}月\d{1,2}日(?:\([月火水木金土日]\))?)\s*(\d{1,2}:\d{2})?'
+    match = re.search(pattern, text)
+    
+    if match:
+        deadline = match.group(0).strip()
+        title = text.replace(deadline, "").strip()
+        return title, deadline
+    return text, ""
 
 def run():
     school_id = os.environ.get("LOILO_SCHOOL_ID")
@@ -26,13 +36,11 @@ def run():
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
-            # ブラウザ警告ポップアップ解除
             warning_overlay = page.query_selector("#continue")
             if warning_overlay and warning_overlay.is_visible():
                 warning_overlay.click(force=True)
                 time.sleep(1)
 
-            # ログイン処理
             visible_inputs = page.query_selector_all("input:not([type='hidden'])")
             if len(visible_inputs) < 2:
                 btn = page.get_by_text("ロイロノートでログイン", exact=True)
@@ -67,7 +75,6 @@ def run():
             time.sleep(5)
             print("★ ログイン完了")
 
-            # 左サイドバーの「募集中」教科を特定
             recruiting_badges = page.get_by_text("募集中").all()
             print(f"検出された『募集中』教科の数: {len(recruiting_badges)}")
 
@@ -96,40 +103,41 @@ def run():
                     badge.click(force=True)
                     time.sleep(3)
 
-                    # 提出箱タブをクリックして確実に表示
                     tab = page.get_by_text("提出箱")
                     if tab.count() > 0 and tab.first.is_visible():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 提出箱パネル内のアイテム（タイトルと締切）をピンポイント抽出
+                    # 提出箱パネル内のアイテム（タイトルと締切）を抽出
                     cards = page.locator("div, a, li").filter(has_text=re.compile(r'明日|今日|\d{1,2}月\d{1,2}日')).all()
 
                     for card in cards:
-                        # 最小単位のカード要素のみを対象とする（余計な親要素を除外）
                         if card.locator("div, a, li").filter(has_text=re.compile(r'明日|今日|\d{1,2}月\d{1,2}日')).count() > 1:
                             continue
 
                         text = card.text_content().strip()
-                        card_lines = [l.strip() for l in text.split('\n') if l.strip()]
+                        if len(text) > 150 or len(text) < 5:
+                            continue
 
-                        if len(card_lines) >= 2:
-                            title = card_lines[0]
-                            deadline = card_lines[1]
+                        # タイトルと締切を自動分割
+                        title, deadline = extract_deadline_and_title(text)
 
-                            # 雑多なノート履歴テキストを完全除外
-                            if "のノート" in title or title.startswith("2026年") or "テスト直し2026" in title or "二学期2026" in title:
-                                continue
+                        if not title:
+                            title = "宿題"
 
-                            item_id = f"{subject_name}_{title}"
-                            if not any(x.get("id") == item_id for x in unsubmitted_items):
-                                unsubmitted_items.append({
-                                    "id": item_id,
-                                    "subject": subject_name,
-                                    "title": title,
-                                    "deadline": deadline
-                                })
-                                print(f"  └ 【成果物】 [{subject_name}] {title} / 締切: {deadline}")
+                        # 過去のノイズ（ノート履歴など）を完全除外
+                        if "のノート" in title or title.startswith("2026年") or "テスト直し" in title or "二学期2026" in title or "共有ノート" in title or "タイムライン" in title:
+                            continue
+
+                        item_id = f"{subject_name}_{title}"
+                        if not any(x.get("id") == item_id for x in unsubmitted_items):
+                            unsubmitted_items.append({
+                                "id": item_id,
+                                "subject": subject_name,
+                                "title": title,
+                                "deadline": deadline
+                            })
+                            print(f"  └ 【成果物】 [{subject_name}] {title} / 締切: {deadline}")
 
                 except Exception as ex:
                     print(f"  └ スキップ: {ex}")
