@@ -1,18 +1,5 @@
 {
-  "updated_at": "2026-09-04 10:50:40",
-  "count": 2,
-  "items": [
-    {
-      "id": "Communication_夏休み明け漢字テスト",
-      "subject": "Communication",
-      "title": "夏休み明け漢字テスト",
-      "deadline": "9月8日(火) 14:30 9月8日(火) 14:30"
-    },
-    {
-      "id": "Communication_自主学習ノート（9/1～5、※代数幾何共通）",
-      "subject": "Communication",
-      "title": "自主学習ノート（9/1～5、※代数幾何共通）",
-      "deadline": "明日 13:00 明日 13:00"
-    }
-  ]
+  "updated_at": "2026-09-04 11:10:05",
+  "count": 0,
+  "items": []
 }
