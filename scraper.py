@@ -73,16 +73,10 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # バッジの直属の行レベルから正確な教科名を取得
-                    parent_row = badge.locator("xpath=ancestor::li[1]")
-                    if parent_row.count() == 0:
-                        parent_row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or contains(@class, 'item')][1]")
-                    
-                    subject_el = parent_row.locator(".ellipsisText").first
-                    if subject_el.count() > 0:
-                        subject_name = subject_el.text_content().strip()
-                    else:
-                        subject_name = f"教科{i+1}"
+                    # ユーザー指定：バッジが存在する行にスコープを絞り、その中のellipsisTextを取得
+                    row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
+                    subject_el = row.locator(".ellipsisText").first
+                    subject_name = subject_el.text_content().strip() if subject_el.count() > 0 else f"教科{i+1}"
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     badge.click(force=True)
@@ -93,31 +87,36 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 現在画面上に表示されているパネルのみをピンポイント抽出
-                    cards = page.locator(".coursePanel").filter(is_visible=True).all()
+                    # ユーザー指定：.focusScope を用いて、現在アクティブなパネルのみを狙い撃ちする
+                    cards = page.locator(".focusScope .coursePanel").all()
+                    if not cards:
+                        cards = page.locator(".focusScope.coursePanel").all()
+                    if not cards:
+                        cards = page.locator(".coursePanel").filter(is_visible=True).all()
 
                     for card in cards:
+                        # ユーザー指定：タスクタイトルの取得
                         title_el = card.locator(".ellipsisText").first
                         if title_el.count() == 0:
                             continue
                         title = title_el.text_content().strip()
 
-                        # 締切日時の正確な取得（重複防止）
+                        # ユーザー指定：締切の重複を防ぎ、どちらか片方だけを取得
                         deadline = ""
-                        status_el = card.locator(".submissionStatusText")
                         countdown_el = card.locator(".submissionCountDownText")
+                        status_el = card.locator(".submissionStatusText")
                         
-                        if status_el.count() > 0 and status_el.first.is_visible():
-                            deadline = status_el.first.text_content().strip()
-                        elif countdown_el.count() > 0 and countdown_el.first.is_visible():
+                        if countdown_el.count() > 0 and countdown_el.first.text_content().strip():
                             deadline = countdown_el.first.text_content().strip()
+                        elif status_el.count() > 0 and status_el.first.text_content().strip():
+                            deadline = status_el.first.text_content().strip()
+
+                        # 締切日が全くない要素（タイムラインや共有ノート等）はスキップ
+                        if not deadline:
+                            continue
 
                         card_text = card.text_content() or ""
                         if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
-                            continue
-
-                        # ノート履歴などのノイズ除外
-                        if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
                             continue
 
                         item_id = f"{subject_name}_{title}"
@@ -128,7 +127,7 @@ def run():
                                 "title": title,
                                 "deadline": deadline
                             })
-                            print(f"  └ 【成果物】 [{subject_name}] {title} / 締切: {deadline}")
+                            print(f"  └ 【抽出】 [{subject_name}] {title} / 締切: {deadline}")
 
                 except Exception as ex:
                     print(f"  └ スキップ: {ex}")
