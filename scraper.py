@@ -4,45 +4,56 @@ import time
 from playwright.sync_api import sync_playwright
 
 def run():
-    school_id = os.environ.get("LOILO_SCHOOL_ID")
+    # Googleアカウント（メールアドレス）とパスワードを取得
     user_id = os.environ.get("LOILO_USER_ID")
     password = os.environ.get("LOILO_PASSWORD")
 
     unsubmitted_items = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        # Googleの自動ログインブロックを回避するための設定
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--disable-blink-features=AutomationControlled']
+        )
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         page = context.new_page()
 
-        # 1. ロイロノートWeb版へアクセス・ログイン
+        # 1. ロイロノートWeb版へアクセス
         page.goto("https://loilonote.app")
-        page.wait_for_selector("text=ロイロノートでログイン", timeout=15000)
-        page.click("text=ロイロノートでログイン")
+        page.wait_for_selector("text=Googleでログイン", timeout=15000)
+        
+        # 2. 「Googleでログイン」をクリック
+        page.click("text=Googleでログイン")
 
-        page.fill("input[placeholder*='学校ID']", school_id)
-        page.fill("input[placeholder*='ユーザーID']", user_id)
-        page.fill("input[placeholder*='パスワード']", password)
-        page.click("button:has-text('ログイン')")
+        # 3. Googleメールアドレス入力
+        page.wait_for_selector("input[type='email']", timeout=15000)
+        page.fill("input[type='email']", user_id)
+        page.click("#identifierNext")
 
-        # ダッシュボード読込待ち
-        page.wait_for_selector(".left-pane", timeout=20000)
+        # 4. Googleパスワード入力
+        page.wait_for_selector("input[type='password']", timeout=15000)
+        page.fill("input[type='password']", password)
+        page.click("#passwordNext")
 
-        # 2. 「募集中」バッジのある教科を巡回
-        # 左側リスト内の「募集中」要素を取得
+        # 5. ロイロノートのダッシュボード読込待ち
+        page.wait_for_selector(".left-pane", timeout=30000)
+
+        # 6. 「募集中」バッジのある教科を巡回
         recruiting_elements = page.query_selector_all("text=募集中")
 
         for elem in recruiting_elements:
-            # 教科名を取得（親要素からテキスト抽出）
             parent_subject = elem.evaluate("node => node.closest('.subject-item, li, div')")
             subject_name = parent_subject.text_content().replace("募集中", "").strip() if parent_subject else "教科"
 
-            # 教科をクリックして提出箱一覧を開く
             elem.click()
             time.sleep(2)
 
-            # 3. 未提出の提出箱を抽出（緑色のチェックマークが付いていないもの）
-            boxes = page.query_selector_all(".submission-box-item") # 実際の要素に合わせて判定
+            # 7. 未提出の提出箱を抽出（緑色のチェックマークが付いていないもの）
+            boxes = page.query_selector_all(".submission-box-item")
             for box in boxes:
                 is_submitted = box.query_selector(".icon-check-green, [data-status='submitted']")
                 if not is_submitted:
