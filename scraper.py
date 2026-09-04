@@ -12,7 +12,6 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # 最新バージョンのUser-Agentを設定して警告ポップアップ発生を回避
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
@@ -32,25 +31,25 @@ def run():
                 warning_overlay.click(force=True)
                 time.sleep(1)
 
-            # 画面上にすでに入力フォームが出ているか確認
-            inputs_count = len(page.query_selector_all("input"))
+            # 画面上に画面表示用の入力フォームがすでにあるか確認
+            visible_inputs = page.query_selector_all("input:not([type='hidden'])")
             
-            if inputs_count < 2:
+            if len(visible_inputs) < 2:
                 btn = page.get_by_text("ロイロノートでログイン", exact=True)
                 if not btn.is_visible():
                     btn = page.get_by_text("Sign in with LoiLoNote", exact=True)
 
                 print("「ロイロノートでログイン」ボタンをクリックします...")
-                # force=True で要素の重なりを無視して強制クリック
                 btn.click(force=True)
                 time.sleep(2)
 
-            # 2. 入力フォームの読み込み待ち
+            # 2. 画面に表示されている入力フォームの読み込み待ち
             print("入力フォームを探しています...")
-            page.wait_for_selector("input", timeout=20000)
+            page.wait_for_selector("input:not([type='hidden'])", timeout=20000)
 
-            inputs = page.query_selector_all("input")
-            print(f"入力欄（input）を {len(inputs)} 個検出しました。")
+            # 表示中の入力欄を取得
+            inputs = page.query_selector_all("input:not([type='hidden'])")
+            print(f"表示中の入力欄（input）を {len(inputs)} 個検出しました。")
 
             school_input = page.query_selector("input[placeholder*='学校']") or (inputs[0] if len(inputs) > 0 else None)
             user_input = page.query_selector("input[placeholder*='ユーザー']") or (inputs[1] if len(inputs) > 1 else None)
@@ -65,8 +64,9 @@ def run():
             # ログイン実行ボタンを押す
             submit_btn = (
                 page.query_selector("button:has-text('ログイン')") or 
-                page.query_selector("button[type='submit']") or 
-                page.query_selector("input[type='submit']")
+                page.query_selector("input[type='submit']") or 
+                page.query_selector("button[type='submit']") or
+                page.query_selector("button")
             )
             if submit_btn:
                 submit_btn.click(force=True)
