@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="300"> <!-- 5分ごとに画面更新 -->
+  <meta http-equiv="refresh" content="300">
   <title>家族用 宿題アンテナ</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -24,7 +24,6 @@
     h1 { font-size: 2rem; font-weight: 800; letter-spacing: 0.05em; }
     .updated { font-size: 0.85rem; color: #94a3b8; margin-top: 0.4rem; }
 
-    /* カテゴリーエリア */
     .section-title {
       font-size: 1.3rem;
       font-weight: bold;
@@ -44,17 +43,14 @@
       gap: 1rem;
     }
 
-    /* タスクカードデザイン */
     .card {
       background: #1e293b;
       border-radius: 12px;
       padding: 1.2rem;
       border-left: 6px solid #64748b;
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
-      position: relative;
     }
 
-    /* 状況別のカードスタイル */
     .card.status-urgent {
       border-left-color: #ef4444;
       background: linear-gradient(135deg, #1e293b 70%, #451a1a 100%);
@@ -69,7 +65,6 @@
     }
     .card.status-overdue {
       border-left-color: #a855f7;
-      opacity: 0.85;
       background: #181e29;
     }
 
@@ -79,7 +74,6 @@
       100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
     }
 
-    /* カード内要素 */
     .card-header {
       display: flex;
       justify-content: space-between;
@@ -89,9 +83,9 @@
     .subject-badge {
       background: #334155;
       color: #38bdf8;
-      font-size: 0.85rem;
+      font-size: 0.9rem;
       font-weight: bold;
-      padding: 0.25rem 0.6rem;
+      padding: 0.3rem 0.7rem;
       border-radius: 6px;
     }
     .status-badge {
@@ -106,7 +100,7 @@
     .badge-overdue { background: #a855f7; color: #fff; }
 
     .title {
-      font-size: 1.25rem;
+      font-size: 1.15rem;
       font-weight: bold;
       margin-bottom: 0.8rem;
       line-height: 1.4;
@@ -120,7 +114,6 @@
       gap: 0.4rem;
     }
 
-    /* 宿題ゼロのクリア表示 */
     .clear-message {
       text-align: center;
       padding: 4rem 1rem;
@@ -142,37 +135,40 @@
   <main id="container"></main>
 
   <script>
-    // 締切文字列の解析（Pythonスクレイピング結果の各種フォーマットに対応）
+    // 「明日 22:00」や「9月9日(水) 22:00」を解析する関数
     function parseDeadline(str) {
       if (!str) return new Date(8640000000000000);
       const now = new Date();
       let year = now.getFullYear();
-      let month, day, hour = 23, minute = 59;
+      let month = now.getMonth();
+      let day = now.getDate();
+      let hour = 23, minute = 59;
 
-      const yearMatch = str.match(/(\d{4})年/);
-      if (yearMatch) year = parseInt(yearMatch[1]);
-
-      const mdMatch = str.match(/(\d{1,2})月(\d{1,2})日/) || str.match(/(\d{1,2})\/(\d{1,2})/);
-      if (mdMatch) {
-        month = parseInt(mdMatch[1]) - 1;
-        day = parseInt(mdMatch[2]);
+      if (str.includes("明日")) {
+        const tomorrow = new Date(now.getTime() + (24 * 60 * 60 * 1000));
+        year = tomorrow.getFullYear();
+        month = tomorrow.getMonth();
+        day = tomorrow.getDate();
       } else {
-        return new Date(8640000000000000);
+        const yearMatch = str.match(/(\d{4})年/);
+        if (yearMatch) year = parseInt(yearMatch[1]);
+
+        const mdMatch = str.match(/(\d{1,2})月(\d{1,2})日/) || str.match(/(\d{1,2})\/(\d{1,2})/);
+        if (mdMatch) {
+          month = parseInt(mdMatch[1]) - 1;
+          day = parseInt(mdMatch[2]);
+        }
       }
 
       const timeMatch = str.match(/(\d{1,2}):(\d{2})/);
       if (timeMatch) {
         hour = parseInt(timeMatch[1]);
         minute = parseInt(timeMatch[2]);
-      } else {
-        const hourMatch = str.match(/(\d{1,2})時/);
-        if (hourMatch) hour = parseInt(hourMatch[1]);
       }
 
       return new Date(year, month, day, hour, minute);
     }
 
-    // 宿題データの読み込み・描画処理
     async function loadHomework() {
       try {
         const res = await fetch('./data.json?t=' + Date.now());
@@ -196,26 +192,23 @@
         const tomorrow15 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0);
         const threeDaysLater = new Date(now.getTime() + (3 * 24 * 60 * 60 * 1000));
 
-        // 締切日時を計算してアイテムに追加
         const items = data.items.map(item => {
           const d = parseDeadline(item.deadline);
           let category = 'normal';
 
           if (d < now) {
-            category = 'overdue'; // 期限切れ
+            category = 'overdue';
           } else if (d <= tomorrow15) {
-            category = 'urgent';  // 緊急（今日・明日15時前）
+            category = 'urgent';
           } else if (d <= threeDaysLater) {
-            category = 'warning'; // 要注意（3日前）
+            category = 'warning';
           }
 
           return { ...item, dateObj: d, category };
         });
 
-        // 締切順（昇順）でソート
         items.sort((a, b) => a.dateObj - b.dateObj);
 
-        // カテゴリー別にグループ分け
         const categories = [
           { key: 'urgent', title: '🚨【至急】今日〜明日15時締め切り', class: 'urgent' },
           { key: 'warning', title: '⚠️【注意】締め切り3日前以内', class: 'warning' },
