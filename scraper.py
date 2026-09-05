@@ -74,37 +74,20 @@ def run():
                         break
                     badge = badges[i]
                     
-                    subject_name = badge.evaluate("""(badge) => {
-                        let curr = badge.parentElement;
-                        while (curr && curr.tagName !== 'BODY') {
-                            if (curr.classList.contains('roundListSectionGroup') || curr.classList.contains('courseListBody')) {
-                                break; 
-                            }
-                            let texts = curr.querySelectorAll('.ellipsisText');
-                            if (texts.length > 0) {
-                                return texts[0].innerText.trim();
-                            }
-                            curr = curr.parentElement;
-                        }
-                        return '';
-                    }""")
-
-                    if not subject_name:
+                    row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
+                    subject_el = row.locator(".ellipsisText").first
+                    
+                    if subject_el.count() > 0:
+                        subject_name = subject_el.text_content().strip()
+                        click_target = subject_el
+                    else:
                         subject_name = f"教科{i+1}"
+                        click_target = row
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     
-                    # 【修正】バッジではなく教科名のテキストを直接クリックし、確実に右画面を切り替える
-                    badge.evaluate("""(b) => {
-                        let row = b.closest('.courseListRow') || b.closest('li');
-                        if (row) {
-                            let text = row.querySelector('.ellipsisText');
-                            if (text) text.click();
-                            else row.click();
-                        } else {
-                            b.click();
-                        }
-                    }""")
+                    # 【重要修正】JavaScriptを使わず、Playwright本来の「マウスでのクリック」を強制実行し、確実に右画面を切り替える
+                    click_target.click(force=True)
                     time.sleep(3)
 
                     tab = page.get_by_text("提出箱")
@@ -112,7 +95,6 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 現在表示されているパネルのみを抽出
                     cards = page.locator(".coursePanel").all()
 
                     for card in cards:
