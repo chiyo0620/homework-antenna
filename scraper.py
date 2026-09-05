@@ -27,17 +27,17 @@ def run():
                 warning_overlay = page.wait_for_selector("#continue", state="visible", timeout=3000)
                 if warning_overlay:
                     warning_overlay.click(force=True)
-            except:
+            except Exception:
                 pass
 
             try:
                 page.wait_for_selector("input:not([type='hidden'])", state="visible", timeout=5000)
-            except:
+            except Exception:
                 try:
                     btn = page.locator("text='ロイロノートでログイン'").or_(page.locator("text='Sign in with LoiLoNote'")).first
                     if btn.count() > 0:
                         btn.click(force=True)
-                except:
+                except Exception:
                     pass
 
             page.wait_for_selector("input:not([type='hidden'])", state="visible", timeout=30000)
@@ -61,13 +61,23 @@ def run():
                 submit_btn.click(force=True)
 
             page.wait_for_selector("text='募集中'", timeout=20000)
-            recruiting_badges = page.locator("text='募集中'").all()
+            
+            # 仮想スクロール対策: 隠れた要素を読み込ませるためリストをスクロール
+            try:
+                page.mouse.wheel(0, 500)
+                page.wait_for_timeout(1000)
+            except Exception:
+                pass
 
-            for i in range(len(recruiting_badges)):
+            badges = page.locator("text='募集中'")
+            badges_count = badges.count()
+
+            for i in range(badges_count):
                 try:
-                    badges = page.locator("text='募集中'").all()
-                    if i >= len(badges): break
-                    badge = badges[i]
+                    current_badges = page.locator("text='募集中'")
+                    if i >= current_badges.count(): break
+                    badge = current_badges.nth(i)
+                    badge.scroll_into_view_if_needed()
                     
                     subject_name = badge.evaluate("""(node) => {
                         let curr = node.parentElement;
@@ -86,14 +96,17 @@ def run():
                     else:
                         badge.click(force=True)
                     
-                    # 確実な待機：右パネルのマウントと通信完了を待つ
                     page.wait_for_selector(".focusScope.coursePanel", state="attached", timeout=10000)
                     
                     tab = page.locator("text='提出箱'").first
                     if tab.count() > 0:
                         tab.click(force=True)
-                        page.wait_for_load_state("networkidle")
-                        page.wait_for_timeout(1500) # タスクリスト再描画用の最小バッファ
+                        
+                        # 【重要】提出箱のタスク一覧がサーバーから読み込まれるのを最大8秒待機する
+                        try:
+                            page.wait_for_selector(".focusScope.coursePanel .submissionCountDownText, .focusScope.coursePanel .submissionStatusText", state="visible", timeout=8000)
+                        except Exception:
+                            pass
                     
                     tasks_data = page.evaluate("""() => {
                         const results = [];
@@ -146,15 +159,14 @@ def run():
                             })
 
                 except Exception as ex:
-                    print(f"教科処理スキップ: {ex}")
+                    print(f"教科 {i} 処理スキップ: {ex}")
 
         except Exception as err:
-            print(f"致命的なエラー: {err}")
             raise err
         finally:
             browser.close()
 
-    # index.html の変更に適合する ISO 8601 (JST) 形式で出力
+    # ISO 8601 (JST) 形式での出力へ統一
     jst = timezone(timedelta(hours=9), 'JST')
     now_jst = datetime.now(jst)
     
