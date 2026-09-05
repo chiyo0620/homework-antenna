@@ -12,7 +12,7 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # 【確実な修正】日本時間設定を追加し「13:00」のズレを解消
+        # 日本時間設定（正常動作確認済み）
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
@@ -75,7 +75,7 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # 【確実に機能していたロジック】正確な教科名の取得
+                    # 教科名の取得（正常動作確認済み）
                     subject_name = badge.evaluate("""(badge) => {
                         let curr = badge.parentElement;
                         while (curr && curr.tagName !== 'BODY') {
@@ -96,8 +96,15 @@ def run():
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     
-                    # 【確実に機能していたロジック】通常のクリック動作に戻す
-                    badge.click(force=True)
+                    # 【今回の唯一の変更点】バッジではなく、教科名テキストを安全に直接クリックする
+                    row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
+                    text_target = row.locator(".ellipsisText").first
+                    
+                    if text_target.count() > 0:
+                        text_target.click(force=True)
+                    else:
+                        badge.click(force=True)
+                        
                     time.sleep(3)
 
                     tab = page.get_by_text("提出箱")
@@ -105,7 +112,7 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 【確実に機能していたロジック】アクティブなカードのみ抽出
+                    # タスクの抽出（正常動作確認済み）
                     cards = page.locator(".focusScope .coursePanel").all()
                     if not cards:
                         cards = page.locator(".focusScope.coursePanel").all()
