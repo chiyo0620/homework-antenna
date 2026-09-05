@@ -12,6 +12,7 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        # 【確実な修正】日本時間設定を追加し「13:00」のズレを解消
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
@@ -74,20 +75,29 @@ def run():
                         break
                     badge = badges[i]
                     
-                    row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
-                    subject_el = row.locator(".ellipsisText").first
-                    
-                    if subject_el.count() > 0:
-                        subject_name = subject_el.text_content().strip()
-                        click_target = subject_el
-                    else:
+                    # 【確実に機能していたロジック】正確な教科名の取得
+                    subject_name = badge.evaluate("""(badge) => {
+                        let curr = badge.parentElement;
+                        while (curr && curr.tagName !== 'BODY') {
+                            if (curr.classList.contains('roundListSectionGroup') || curr.classList.contains('courseListBody')) {
+                                break; 
+                            }
+                            let texts = curr.querySelectorAll('.ellipsisText');
+                            if (texts.length > 0) {
+                                return texts[0].innerText.trim();
+                            }
+                            curr = curr.parentElement;
+                        }
+                        return '';
+                    }""")
+
+                    if not subject_name:
                         subject_name = f"教科{i+1}"
-                        click_target = row
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     
-                    # 【重要修正】JavaScriptを使わず、Playwright本来の「マウスでのクリック」を強制実行し、確実に右画面を切り替える
-                    click_target.click(force=True)
+                    # 【確実に機能していたロジック】通常のクリック動作に戻す
+                    badge.click(force=True)
                     time.sleep(3)
 
                     tab = page.get_by_text("提出箱")
@@ -95,12 +105,14 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    cards = page.locator(".coursePanel").all()
+                    # 【確実に機能していたロジック】アクティブなカードのみ抽出
+                    cards = page.locator(".focusScope .coursePanel").all()
+                    if not cards:
+                        cards = page.locator(".focusScope.coursePanel").all()
+                    if not cards:
+                        cards = page.locator(".coursePanel").filter(is_visible=True).all()
 
                     for card in cards:
-                        if not card.is_visible():
-                            continue
-
                         title_el = card.locator(".ellipsisText").first
                         if title_el.count() == 0:
                             continue
