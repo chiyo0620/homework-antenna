@@ -12,7 +12,6 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # タイムゾーン指定で 13:00 → 22:00 のズレを確実に防止
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
@@ -22,11 +21,9 @@ def run():
         page = context.new_page()
 
         try:
-            print("1. ロイロノートWeb版へアクセス中...")
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
-            # --- ログイン処理 ---
             warning_overlay = page.query_selector("#continue")
             if warning_overlay and warning_overlay.is_visible():
                 warning_overlay.click(force=True)
@@ -61,80 +58,95 @@ def run():
             if submit_btn:
                 submit_btn.click(force=True)
 
-            print("ダッシュボード読み込み待ち...")
             page.wait_for_url("**/_/**", timeout=30000)
             time.sleep(5)
 
-            # 【先輩の修正1】座標ではなくHTML構造で左メニューだけを狙い撃つ
-            # 左メニューのクラス（.courseListRow）のうち、「募集中」という文字を含んでいる行だけを取得
-            target_rows = page.locator(".courseListRow").filter(has_text="募集中")
-            
-            # もし .courseListRow が無ければ、フォールバックとして li を使う
-            if target_rows.count() == 0:
-                target_rows = page.locator("li").filter(has_text="募集中")
-                
-            course_count = target_rows.count()
-            print(f"検出された『募集中』教科の数: {course_count}")
+            recruiting_badges = page.get_by_text("募集中").all()
 
-            for i in range(course_count):
+            for i in range(len(recruiting_badges)):
                 try:
-                    # 画面が切り替わっても安全なように毎回再取得 (nthを使用)
-                    current_rows = page.locator(".courseListRow").filter(has_text="募集中")
-                    if current_rows.count() == 0:
-                        current_rows = page.locator("li").filter(has_text="募集中")
-                        
-                    if i >= current_rows.count():
+                    badges = page.get_by_text("募集中").all()
+                    if i >= len(badges):
                         break
-                        
-                    row = current_rows.nth(i)
+                    badge = badges[i]
                     
-                    # 教科名の取得
-                    subject_el = row.locator(".ellipsisText").first
-                    subject_name = subject_el.text_content().strip() if subject_el.count() > 0 else f"教科{i+1}"
+                    subject_name = badge.evaluate("""(badge) => {
+                        let curr = badge.parentElement;
+                        while (curr && curr.tagName !== 'BODY') {
+                            if (curr.classList.contains('roundListSectionGroup') || curr.classList.contains('courseListBody')) {
+                                break; 
+                            }
+                            let texts = curr.querySelectorAll('.ellipsisText');
+                            if (texts.length > 0) {
+                                return texts[0].innerText.trim();
+                            }
+                            curr = curr.parentElement;
+                        }
+                        return '';
+                    }""")
+
+                    if not subject_name:
+                        subject_name = f"教科{i+1}"
                     
-                    print(f"[{i+1}/{course_count}] 教科『{subject_name}』を開いています...")
-                    
-                    # 確実にクリックして右画面を切り替える
-                    row.scroll_into_view_if_needed()
-                    row.click(force=True)
+                    # 【確実な修正1】バッジの行全体をクリックして確実に右画面を切り替える
+                    row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
+                    if row.count() > 0:
+                        row.click(force=True)
+                    else:
+                        badge.click(force=True)
                     time.sleep(3)
 
-                    # 提出箱タブをクリック（現在画面に見えているものだけ）
-                    tab = page.locator("text=提出箱").filter(is_visible=True).first
-                    if tab.count() > 0:
-                        tab.click(force=True)
+                    tab = page.get_by_text("提出箱")
+                    if tab.count() > 0 and tab.first.is_visible():
+                        tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 【先輩の修正2】右画面のタスク（.coursePanel）だけを取得
-                    cards = page.locator(".coursePanel").filter(is_visible=True)
-                    card_count = cards.count()
-
-                    for j in range(card_count):
-                        card = cards.nth(j)
+                    # 【確実な修正2】1つだけでなく、画面上の「すべて」の締切日時を起点にタスクを100%抽出する
+                    tasks_data = page.evaluate("""() => {
+                        const results = [];
+                        const seenTitles = new Set();
                         
-                        title_el = card.locator(".ellipsisText").first
-                        if title_el.count() == 0:
-                            continue
-                        title = title_el.text_content().strip()
+                        const deadlines = document.querySelectorAll('.submissionCountDownText, .submissionStatusText');
+                        deadlines.forEach(dl => {
+                            const dlText = dl.innerText.trim();
+                            if (!dlText) return;
+                            
+                            let curr = dl.parentElement;
+                            let title = "";
+                            
+                            while (curr && curr.tagName !== 'BODY') {
+                                const titleNodes = curr.querySelectorAll('.ellipsisText');
+                                if (titleNodes.length > 0) {
+                                    for(let node of titleNodes) {
+                                        if (node !== dl && !node.classList.contains('submissionCountDownText') && !node.classList.contains('submissionStatusText')) {
+                                            title = node.innerText.trim();
+                                            break;
+                                        }
+                                    }
+                                    if (title) break;
+                                }
+                                curr = curr.parentElement;
+                            }
+                            
+                            if (!title) title = "宿題";
+                            
+                            let isSubmitted = false;
+                            if (curr && (curr.innerText.includes('提出済') || curr.querySelector('.icon-check-green'))) {
+                                isSubmitted = true;
+                            }
 
-                        # 締切日時の取得
-                        deadline = ""
-                        cd_el = card.locator(".submissionCountDownText").first
-                        st_el = card.locator(".submissionStatusText").first
+                            if (!isSubmitted && !seenTitles.has(title)) {
+                                seenTitles.add(title);
+                                results.push({ title: title, deadline: dlText });
+                            }
+                        });
+                        return results;
+                    }""")
+
+                    for t in tasks_data:
+                        title = t['title']
+                        deadline = t['deadline']
                         
-                        if cd_el.count() > 0 and cd_el.is_visible():
-                            deadline = cd_el.text_content().strip()
-                        elif st_el.count() > 0 and st_el.is_visible():
-                            deadline = st_el.text_content().strip()
-
-                        if not deadline:
-                            continue
-
-                        # 提出済の除外
-                        card_text = card.text_content() or ""
-                        if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
-                            continue
-
                         # ノイズ除外
                         if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
                             continue
@@ -147,13 +159,11 @@ def run():
                                 "title": title,
                                 "deadline": deadline
                             })
-                            print(f"  └ 【抽出成功】 [{subject_name}] {title} / 締切: {deadline}")
 
                 except Exception as ex:
-                    print(f"  └ スキップ: {ex}")
+                    pass
 
         except Exception as err:
-            print(f"エラー発生: {err}")
             raise err
 
         browser.close()
@@ -166,7 +176,6 @@ def run():
 
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    print(f"★ 完了！ {len(unsubmitted_items)} 件の未提出宿題を抽出しました。")
 
 if __name__ == "__main__":
     run()
