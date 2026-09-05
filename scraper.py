@@ -12,7 +12,7 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # 日本時間設定
+        # タイムゾーン指定で 13:00 → 22:00 のズレを確実に防止
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
@@ -22,6 +22,7 @@ def run():
         page = context.new_page()
 
         try:
+            print("1. ロイロノートWeb版へアクセス中...")
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
@@ -60,21 +61,31 @@ def run():
             if submit_btn:
                 submit_btn.click(force=True)
 
+            print("ダッシュボード読み込み待ち...")
             page.wait_for_url("**/_/**", timeout=30000)
             time.sleep(5)
 
-            # 【先輩の修正1】右画面の「募集中」トラップを回避するため、
-            # 左メニューの行（.courseListRow または li）の中にある「募集中」だけを厳格にカウントする
-            course_rows = page.locator(".courseListRow, li").filter(has_text="募集中")
-            course_count = course_rows.count()
+            # 【先輩の修正1】座標ではなくHTML構造で左メニューだけを狙い撃つ
+            # 左メニューのクラス（.courseListRow）のうち、「募集中」という文字を含んでいる行だけを取得
+            target_rows = page.locator(".courseListRow").filter(has_text="募集中")
+            
+            # もし .courseListRow が無ければ、フォールバックとして li を使う
+            if target_rows.count() == 0:
+                target_rows = page.locator("li").filter(has_text="募集中")
+                
+            course_count = target_rows.count()
             print(f"検出された『募集中』教科の数: {course_count}")
 
             for i in range(course_count):
                 try:
-                    # ループごとに再取得してDOMの変更に追従する
-                    current_rows = page.locator(".courseListRow, li").filter(has_text="募集中")
+                    # 画面が切り替わっても安全なように毎回再取得 (nthを使用)
+                    current_rows = page.locator(".courseListRow").filter(has_text="募集中")
+                    if current_rows.count() == 0:
+                        current_rows = page.locator("li").filter(has_text="募集中")
+                        
                     if i >= current_rows.count():
                         break
+                        
                     row = current_rows.nth(i)
                     
                     # 教科名の取得
@@ -83,30 +94,30 @@ def run():
                     
                     print(f"[{i+1}/{course_count}] 教科『{subject_name}』を開いています...")
                     
-                    # 確実に見える位置までスクロールしてクリック
+                    # 確実にクリックして右画面を切り替える
                     row.scroll_into_view_if_needed()
                     row.click(force=True)
                     time.sleep(3)
 
-                    # 提出箱タブをクリック
+                    # 提出箱タブをクリック（現在画面に見えているものだけ）
                     tab = page.locator("text=提出箱").filter(is_visible=True).first
                     if tab.count() > 0:
                         tab.click(force=True)
                         time.sleep(2)
 
-                    # 【先輩の修正2】ユーザー指示通りの正確なクラス名（スペース無し）を使用
-                    # focusScope が付いている現在アクティブなパネルのみを狙い撃ちする
-                    cards = page.locator(".focusScope.coursePanel").filter(is_visible=True).all()
-                    if not cards:
-                        # 念のためのフォールバック
-                        cards = page.locator(".coursePanel").filter(is_visible=True).all()
+                    # 【先輩の修正2】右画面のタスク（.coursePanel）だけを取得
+                    cards = page.locator(".coursePanel").filter(is_visible=True)
+                    card_count = cards.count()
 
-                    for card in cards:
+                    for j in range(card_count):
+                        card = cards.nth(j)
+                        
                         title_el = card.locator(".ellipsisText").first
                         if title_el.count() == 0:
                             continue
                         title = title_el.text_content().strip()
 
+                        # 締切日時の取得
                         deadline = ""
                         cd_el = card.locator(".submissionCountDownText").first
                         st_el = card.locator(".submissionStatusText").first
@@ -119,7 +130,7 @@ def run():
                         if not deadline:
                             continue
 
-                        # 提出済を除外
+                        # 提出済の除外
                         card_text = card.text_content() or ""
                         if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
                             continue
@@ -136,7 +147,7 @@ def run():
                                 "title": title,
                                 "deadline": deadline
                             })
-                            print(f"  └ 【抽出】 [{subject_name}] {title} / 締切: {deadline}")
+                            print(f"  └ 【抽出成功】 [{subject_name}] {title} / 締切: {deadline}")
 
                 except Exception as ex:
                     print(f"  └ スキップ: {ex}")
