@@ -62,7 +62,7 @@ def run():
 
             page.wait_for_selector("text='募集中'", timeout=20000)
             
-            # 仮想スクロール対策: 隠れた要素を読み込ませるためリストをスクロール
+            # 仮想スクロール対策：画面外の要素をDOMにマウントさせるため軽くスクロール
             try:
                 page.mouse.wheel(0, 500)
                 page.wait_for_timeout(1000)
@@ -74,6 +74,7 @@ def run():
 
             for i in range(badges_count):
                 try:
+                    # DOM再描画による detached エラーを防ぐため毎回要素を取り直す
                     current_badges = page.locator("text='募集中'")
                     if i >= current_badges.count(): break
                     badge = current_badges.nth(i)
@@ -96,21 +97,25 @@ def run():
                     else:
                         badge.click(force=True)
                     
+                    # 確実な待機：右パネルのマウント完了を待つ
                     page.wait_for_selector(".focusScope.coursePanel", state="attached", timeout=10000)
                     
                     tab = page.locator("text='提出箱'").first
                     if tab.count() > 0:
                         tab.click(force=True)
                         
-                        # 【重要】提出箱のタスク一覧がサーバーから読み込まれるのを最大8秒待機する
+                        # 確実な待機：ネットワーク通信が落ち着くのを待つ
+                        page.wait_for_load_state("networkidle")
+                        
+                        # 確実な待機：課題リスト（時間表示）が実際に描画されるまで最大6秒待機（空の提出箱も考慮してエラーは握り潰す）
                         try:
-                            page.wait_for_selector(".focusScope.coursePanel .submissionCountDownText, .focusScope.coursePanel .submissionStatusText", state="visible", timeout=8000)
+                            page.wait_for_selector(".focusScope.coursePanel .submissionCountDownText, .focusScope.coursePanel .submissionStatusText", state="visible", timeout=6000)
                         except Exception:
                             pass
                     
                     tasks_data = page.evaluate("""() => {
                         const results = [];
-                        const seen = new Set();
+                        const seenKeys = new Set();
                         const deadlines = document.querySelectorAll('.submissionCountDownText, .submissionStatusText');
                         
                         deadlines.forEach(dl => {
@@ -118,7 +123,8 @@ def run():
                             if (!dlText) return;
                             
                             let curr = dl.parentElement;
-                            let title = "宿題";
+                            let title = "宿題"; // デフォルト名
+                            
                             while (curr && curr.tagName !== 'BODY') {
                                 const titleNodes = curr.querySelectorAll('.ellipsisText');
                                 if (titleNodes.length > 0) {
@@ -134,8 +140,12 @@ def run():
                             }
                             
                             let isSubmitted = curr && (curr.innerText.includes('提出済') || curr.querySelector('.icon-check-green'));
-                            if (!isSubmitted && !seen.has(title)) {
-                                seen.add(title);
+                            
+                            // 修正箇所：タイトルだけでなく、タイトル＋期限の組み合わせで重複排除を行う
+                            const uniqueKey = title + "_" + dlText;
+                            
+                            if (!isSubmitted && !seenKeys.has(uniqueKey)) {
+                                seenKeys.add(uniqueKey);
                                 results.push({ title, deadline: dlText });
                             }
                         });
@@ -149,7 +159,7 @@ def run():
                         if any(noise in title for noise in ["のノート", "共有ノート", "タイムライン"]) or title.startswith("2026年"):
                             continue
                             
-                        item_id = f"{subject_name}_{title}"
+                        item_id = f"{subject_name}_{title}_{deadline}"
                         if not any(x["id"] == item_id for x in unsubmitted_items):
                             unsubmitted_items.append({
                                 "id": item_id,
