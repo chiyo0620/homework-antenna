@@ -177,11 +177,11 @@
         const res = await fetch('./data.json?t=' + Date.now());
         const data = await res.json();
 
-        // ISO形式（+09:00付き）のため、そのままDateオブジェクトへ渡すだけで正確に解釈されます
+        // 最終更新日時のJST適用
         const localDate = new Date(data.updated_at);
         const jstString = localDate.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
         document.getElementById('updatedAt').textContent = '最終更新: ' + jstString;
-
+        
         const container = document.getElementById('container');
         container.innerHTML = '';
 
