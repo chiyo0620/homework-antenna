@@ -177,7 +177,7 @@
         const res = await fetch('./data.json?t=' + Date.now());
         const data = await res.json();
 
-        // 最終更新日時（JST）の表示
+        // 最終更新日時のJST変換
         const utcDate = new Date(data.updated_at.replace(" ", "T") + "Z");
         const jstString = utcDate.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
         document.getElementById('updatedAt').textContent = '最終更新: ' + jstString;
@@ -197,7 +197,8 @@
 
         const now = new Date();
         const tomorrow15 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0, 0);
-        // 今日含め3日後の23:59:59までを「注意」枠とする
+        
+        // 【重要】3日後の 23:59:59 に正確に設定
         const threeDaysLater = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3, 23, 59, 59);
         const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
 
@@ -228,7 +229,6 @@
           return;
         }
 
-        // 締切順昇順ソート
         items.sort((a, b) => a.dateObj - b.dateObj);
 
         const categories = [
