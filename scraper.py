@@ -88,26 +88,30 @@ def run():
                     if not subject_name:
                         subject_name = f"教科{i+1}"
                     
-                    # 【確実な修正1】バッジの行全体をクリックして確実に右画面を切り替える
-                    row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
-                    if row.count() > 0:
-                        row.click(force=True)
-                    else:
-                        badge.click(force=True)
+                    # 確実に教科行をクリックして画面を切り替える
+                    badge.evaluate("""(b) => {
+                        let row = b.closest('.courseListRow') || b.closest('li');
+                        if (row) row.click();
+                        else b.click();
+                    }""")
                     time.sleep(3)
 
-                    tab = page.get_by_text("提出箱")
-                    if tab.count() > 0 and tab.first.is_visible():
-                        tab.first.click(force=True)
-                        time.sleep(2)
+                    # 【確実な修正1】現在画面に「見えている提出箱タブ」だけを厳格にクリックする
+                    visible_tabs = page.locator("text=提出箱").filter(is_visible=True).all()
+                    if visible_tabs:
+                        visible_tabs[0].click(force=True)
+                    time.sleep(2)
 
-                    # 【確実な修正2】1つだけでなく、画面上の「すべて」の締切日時を起点にタスクを100%抽出する
+                    # 【確実な修正2】見えているタスクだけを抽出し、裏に隠れた別教科のタスクを除外
                     tasks_data = page.evaluate("""() => {
                         const results = [];
                         const seenTitles = new Set();
                         
                         const deadlines = document.querySelectorAll('.submissionCountDownText, .submissionStatusText');
                         deadlines.forEach(dl => {
+                            // offsetParentがnull＝画面に表示されていない（裏に隠れている）ため無視
+                            if (dl.offsetParent === null) return;
+                            
                             const dlText = dl.innerText.trim();
                             if (!dlText) return;
                             
@@ -147,7 +151,6 @@ def run():
                         title = t['title']
                         deadline = t['deadline']
                         
-                        # ノイズ除外
                         if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
                             continue
 
