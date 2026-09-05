@@ -73,10 +73,25 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # ユーザー指定：バッジが存在する行にスコープを絞り、その中のellipsisTextを取得
-                    row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
-                    subject_el = row.locator(".ellipsisText").first
-                    subject_name = subject_el.text_content().strip() if subject_el.count() > 0 else f"教科{i+1}"
+                    # 【完全修正】JavaScriptを用いて、バッジのある行の「教科名」をピンポイントで取得
+                    # 教科グループ全体（roundListSectionGroup等）にぶつかる前に .ellipsisText を探すことで、他の教科名を誤取得することを防ぎます。
+                    subject_name = badge.evaluate("""(badge) => {
+                        let curr = badge.parentElement;
+                        while (curr && curr.tagName !== 'BODY') {
+                            if (curr.classList.contains('roundListSectionGroup') || curr.classList.contains('courseListBody')) {
+                                break; 
+                            }
+                            let texts = curr.querySelectorAll('.ellipsisText');
+                            if (texts.length > 0) {
+                                return texts[0].innerText.trim();
+                            }
+                            curr = curr.parentElement;
+                        }
+                        return '';
+                    }""")
+
+                    if not subject_name:
+                        subject_name = f"教科{i+1}"
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
                     badge.click(force=True)
@@ -87,7 +102,7 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # ユーザー指定：.focusScope を用いて、現在アクティブなパネルのみを狙い撃ちする
+                    # 現在画面上に表示されているパネルのみを抽出
                     cards = page.locator(".focusScope .coursePanel").all()
                     if not cards:
                         cards = page.locator(".focusScope.coursePanel").all()
@@ -95,13 +110,12 @@ def run():
                         cards = page.locator(".coursePanel").filter(is_visible=True).all()
 
                     for card in cards:
-                        # ユーザー指定：タスクタイトルの取得
                         title_el = card.locator(".ellipsisText").first
                         if title_el.count() == 0:
                             continue
                         title = title_el.text_content().strip()
 
-                        # ユーザー指定：締切の重複を防ぎ、どちらか片方だけを取得
+                        # 締切の重複を防ぎ、どちらか片方だけを取得
                         deadline = ""
                         countdown_el = card.locator(".submissionCountDownText")
                         status_el = card.locator(".submissionStatusText")
@@ -111,12 +125,15 @@ def run():
                         elif status_el.count() > 0 and status_el.first.text_content().strip():
                             deadline = status_el.first.text_content().strip()
 
-                        # 締切日が全くない要素（タイムラインや共有ノート等）はスキップ
                         if not deadline:
                             continue
 
                         card_text = card.text_content() or ""
                         if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
+                            continue
+
+                        # ノート履歴などのノイズ除外
+                        if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
                             continue
 
                         item_id = f"{subject_name}_{title}"
