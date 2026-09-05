@@ -12,9 +12,11 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        # 【修正】timezone_id を Asia/Tokyo に指定し、ロイロノートの画面表示を日本時間に強制する
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
+            timezone_id="Asia/Tokyo",
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         )
         page = context.new_page()
@@ -73,8 +75,6 @@ def run():
                         break
                     badge = badges[i]
                     
-                    # 【完全修正】JavaScriptを用いて、バッジのある行の「教科名」をピンポイントで取得
-                    # 教科グループ全体（roundListSectionGroup等）にぶつかる前に .ellipsisText を探すことで、他の教科名を誤取得することを防ぎます。
                     subject_name = badge.evaluate("""(badge) => {
                         let curr = badge.parentElement;
                         while (curr && curr.tagName !== 'BODY') {
@@ -102,7 +102,6 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    # 現在画面上に表示されているパネルのみを抽出
                     cards = page.locator(".focusScope .coursePanel").all()
                     if not cards:
                         cards = page.locator(".focusScope.coursePanel").all()
@@ -115,7 +114,6 @@ def run():
                             continue
                         title = title_el.text_content().strip()
 
-                        # 締切の重複を防ぎ、どちらか片方だけを取得
                         deadline = ""
                         countdown_el = card.locator(".submissionCountDownText")
                         status_el = card.locator(".submissionStatusText")
@@ -132,7 +130,6 @@ def run():
                         if "提出済" in card_text or card.locator(".icon-check-green").count() > 0:
                             continue
 
-                        # ノート履歴などのノイズ除外
                         if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
                             continue
 
