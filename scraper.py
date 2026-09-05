@@ -12,7 +12,6 @@ def run():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # 【修正】timezone_id を Asia/Tokyo に指定し、ロイロノートの画面表示を日本時間に強制する
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
@@ -94,7 +93,18 @@ def run():
                         subject_name = f"教科{i+1}"
 
                     print(f"[{i+1}/{len(recruiting_badges)}] 教科『{subject_name}』を開いています...")
-                    badge.click(force=True)
+                    
+                    # 【修正】バッジではなく教科名のテキストを直接クリックし、確実に右画面を切り替える
+                    badge.evaluate("""(b) => {
+                        let row = b.closest('.courseListRow') || b.closest('li');
+                        if (row) {
+                            let text = row.querySelector('.ellipsisText');
+                            if (text) text.click();
+                            else row.click();
+                        } else {
+                            b.click();
+                        }
+                    }""")
                     time.sleep(3)
 
                     tab = page.get_by_text("提出箱")
@@ -102,13 +112,13 @@ def run():
                         tab.first.click(force=True)
                         time.sleep(2)
 
-                    cards = page.locator(".focusScope .coursePanel").all()
-                    if not cards:
-                        cards = page.locator(".focusScope.coursePanel").all()
-                    if not cards:
-                        cards = page.locator(".coursePanel").filter(is_visible=True).all()
+                    # 現在表示されているパネルのみを抽出
+                    cards = page.locator(".coursePanel").all()
 
                     for card in cards:
+                        if not card.is_visible():
+                            continue
+
                         title_el = card.locator(".ellipsisText").first
                         if title_el.count() == 0:
                             continue
