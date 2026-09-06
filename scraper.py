@@ -4,12 +4,26 @@ import time
 from datetime import datetime, timezone, timedelta
 from playwright.sync_api import sync_playwright
 
+# 【追加】API通信キャプチャ用のグローバル変数
+CAPTURED_API_DATA = {}
+
+def handle_response(response):
+    """裏側で走るXHR/Fetch通信（JSON）をすべてフックして取得する"""
+    try:
+        if response.request.resource_type in ["xhr", "fetch"]:
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type:
+                url = response.url
+                # 分析・トラッキング系の不要な通信を除外
+                if "analytics" not in url and "log" not in url:
+                    CAPTURED_API_DATA[url] = response.json()
+    except Exception:
+        pass
+
 def run():
     school_id = os.environ.get("LOILO_SCHOOL_ID")
     user_id = os.environ.get("LOILO_USER_ID")
     password = os.environ.get("LOILO_PASSWORD")
-
-    unsubmitted_items = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -20,6 +34,9 @@ def run():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         )
         page = context.new_page()
+        
+        # 【追加】レスポンス監視の開始
+        page.on("response", handle_response)
 
         try:
             print("【DEBUG】ログイン画面へアクセス中...")
@@ -65,13 +82,13 @@ def run():
             page.wait_for_url("**/_/**", timeout=30000)
             time.sleep(5)
 
-            # 【仮想スクロール対策】画面外の教科をDOMに読み込ませる
             page.mouse.wheel(0, 1500)
             time.sleep(2)
 
             recruiting_badges = page.get_by_text("募集中").all()
             print(f"【DEBUG】検知された「募集中」バッジの総数: {len(recruiting_badges)}")
 
+            # DOMからのデータ抽出は廃止し、APIを叩かせるためのクリックのみ実行
             for i in range(len(recruiting_badges)):
                 try:
                     badges = page.get_by_text("募集中").all()
@@ -80,109 +97,23 @@ def run():
                     badge = badges[i]
                     badge.scroll_into_view_if_needed()
                     
-                    subject_name = badge.evaluate("""(badge) => {
-                        let curr = badge.parentElement;
-                        while (curr && curr.tagName !== 'BODY') {
-                            if (curr.classList.contains('roundListSectionGroup') || curr.classList.contains('courseListBody')) {
-                                break; 
-                            }
-                            let texts = curr.querySelectorAll('.ellipsisText');
-                            if (texts.length > 0) {
-                                return texts[0].innerText.trim();
-                            }
-                            curr = curr.parentElement;
-                        }
-                        return '';
-                    }""")
-
-                    if not subject_name:
-                        subject_name = f"教科{i+1}"
-                    
                     row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
                     if row.count() > 0:
                         row.click(force=True)
                     else:
                         badge.click(force=True)
 
-                    # 【修正】右パネルが描画されるのを待機
                     page.wait_for_selector(".focusScope.coursePanel", state="attached", timeout=10000)
 
                     tab = page.get_by_text("提出箱")
                     if tab.count() > 0 and tab.first.is_visible():
                         tab.first.click(force=True)
-                        # 【修正】提出箱のタスク一覧がネットワークから読み込まれるのを待機
-                        try:
-                            page.wait_for_selector(".focusScope.coursePanel .submissionCountDownText", state="visible", timeout=8000)
-                        except Exception:
-                            print(f"【DEBUG】'{subject_name}' のタスク読込がタイムアウト（空箱の可能性）")
-
-                    print(f"【DEBUG】教科 '{subject_name}' の抽出を開始します。")
-                    page.screenshot(path=f"debug_subject_{i}.png")
-
-                    tasks_data = page.evaluate("""() => {
-                        const results = [];
-                        const seenKeys = new Set(); // 重複判定用キー
-                        
-                        const deadlines = document.querySelectorAll('.submissionCountDownText, .submissionStatusText');
-                        deadlines.forEach(dl => {
-                            const dlText = dl.innerText.trim();
-                            if (!dlText) return;
-                            
-                            let curr = dl.parentElement;
-                            let title = "";
-                            
-                            while (curr && curr.tagName !== 'BODY') {
-                                const titleNodes = curr.querySelectorAll('.ellipsisText');
-                                if (titleNodes.length > 0) {
-                                    for(let node of titleNodes) {
-                                        if (node !== dl && !node.classList.contains('submissionCountDownText') && !node.classList.contains('submissionStatusText')) {
-                                            title = node.innerText.trim();
-                                            break;
-                                        }
-                                    }
-                                    if (title) break;
-                                }
-                                curr = curr.parentElement;
-                            }
-                            
-                            if (!title) title = "宿題";
-                            
-                            let isSubmitted = false;
-                            if (curr && (curr.innerText.includes('提出済') || curr.querySelector('.icon-check-green'))) {
-                                isSubmitted = true;
-                            }
-
-                            // 【修正】タイトル＋締切日時を複合キーにして同一タイトルの破棄を防ぐ
-                            const uniqueKey = title + "_" + dlText;
-
-                            if (!isSubmitted && !seenKeys.has(uniqueKey)) {
-                                seenKeys.add(uniqueKey);
-                                results.push({ title: title, deadline: dlText });
-                            }
-                        });
-                        return results;
-                    }""")
-                    
-                    print(f"【DEBUG】'{subject_name}' の抽出結果: {tasks_data}")
-
-                    for t in tasks_data:
-                        title = t['title']
-                        deadline = t['deadline']
-                        
-                        if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
-                            continue
-
-                        item_id = f"{subject_name}_{title}_{deadline}"
-                        if not any(x.get("id") == item_id for x in unsubmitted_items):
-                            unsubmitted_items.append({
-                                "id": item_id,
-                                "subject": subject_name,
-                                "title": title,
-                                "deadline": deadline
-                            })
+                        # クリック後、API通信が完了するのを待機
+                        page.wait_for_load_state("networkidle")
+                        time.sleep(3) 
 
                 except Exception as ex:
-                    print(f"【ERROR】教科 {i} 処理スキップ: {ex}")
+                    print(f"【ERROR】教科 {i} クリック処理スキップ: {ex}")
 
         except Exception as err:
             print(f"【ERROR】致命的なエラー: {err}")
@@ -190,18 +121,23 @@ def run():
         finally:
             browser.close()
 
-    # ISO 8601 (JST) 形式で出力
-    jst = timezone(timedelta(hours=9), 'JST')
-    now_jst = datetime.now(jst)
-    
-    result = {
-        "updated_at": now_jst.isoformat(),
-        "count": len(unsubmitted_items),
-        "items": unsubmitted_items
-    }
+    # 【追加】フックしたAPIデータを解析用に保存
+    with open("api_debug.json", "w", encoding="utf-8") as f:
+        json.dump(CAPTURED_API_DATA, f, ensure_ascii=False, indent=2)
+    print("【DEBUG】API通信のキャプチャデータを api_debug.json に保存しました。")
 
+    # フロントエンドエラー回避のため、一旦既存のデータを維持して終了
+    try:
+        with open("data.json", "r", encoding="utf-8") as f:
+            old_data = json.load(f)
+    except:
+        old_data = {"count": 0, "items": []}
+    
+    jst = timezone(timedelta(hours=9), 'JST')
+    old_data["updated_at"] = datetime.now(jst).isoformat()
+    
     with open("data.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+        json.dump(old_data, f, ensure_ascii=False, indent=2)
 
 if __name__ == "__main__":
     run()
