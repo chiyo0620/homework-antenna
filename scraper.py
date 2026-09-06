@@ -1,129 +1,66 @@
-import os
-import json
-from datetime import datetime, timezone, timedelta
-from playwright.sync_api import sync_playwright
+page.wait_for_url("**/_/**", timeout=30000)
+            time.sleep(5)
 
-def run():
-    school_id = os.environ.get("LOILO_SCHOOL_ID")
-    user_id = os.environ.get("LOILO_USER_ID")
-    password = os.environ.get("LOILO_PASSWORD")
+            # 【追加】仮想スクロール対策：画面外の教科を読み込ませるために下へスクロール
+            page.mouse.wheel(0, 1500)
+            time.sleep(2)
 
-    unsubmitted_items = []
+            recruiting_badges = page.get_by_text("募集中").all()
+            print(f"【DEBUG】見つかった「募集中」バッジの総数: {len(recruiting_badges)}") # ログ強化
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            locale="ja-JP",
-            timezone_id="Asia/Tokyo",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-
-        try:
-            page.goto("https://loilonote.app/login", wait_until="networkidle")
-
-            try:
-                warning_overlay = page.wait_for_selector("#continue", state="visible", timeout=3000)
-                if warning_overlay:
-                    warning_overlay.click(force=True)
-            except Exception:
-                pass
-
-            try:
-                page.wait_for_selector("input:not([type='hidden'])", state="visible", timeout=5000)
-            except Exception:
+            for i in range(len(recruiting_badges)):
                 try:
-                    btn = page.locator("text='ロイロノートでログイン'").or_(page.locator("text='Sign in with LoiLoNote'")).first
-                    if btn.count() > 0:
-                        btn.click(force=True)
-                except Exception:
-                    pass
-
-            page.wait_for_selector("input:not([type='hidden'])", state="visible", timeout=30000)
-            inputs = page.query_selector_all("input:not([type='hidden'])")
-
-            school_input = page.locator("input[placeholder*='学校']").first
-            if school_input.count() == 0 and len(inputs) > 0: school_input = inputs[0]
-            
-            user_input = page.locator("input[placeholder*='ユーザー']").first
-            if user_input.count() == 0 and len(inputs) > 1: user_input = inputs[1]
-            
-            pass_input = page.locator("input[type='password']").first
-            if pass_input.count() == 0 and len(inputs) > 2: pass_input = inputs[2]
-
-            school_input.fill(school_id)
-            user_input.fill(user_id)
-            pass_input.fill(password)
-
-            submit_btn = page.locator("button:has-text('ログイン'), input[type='submit'], button[type='submit']").first
-            with page.expect_navigation(wait_until="networkidle", timeout=30000):
-                submit_btn.click(force=True)
-
-            page.wait_for_selector("text='募集中'", timeout=20000)
-            
-            # 仮想スクロール対策：画面外の要素をDOMにマウントさせるため軽くスクロール
-            try:
-                page.mouse.wheel(0, 500)
-                page.wait_for_timeout(1000)
-            except Exception:
-                pass
-
-            badges = page.locator("text='募集中'")
-            badges_count = badges.count()
-
-            for i in range(badges_count):
-                try:
-                    # DOM再描画による detached エラーを防ぐため毎回要素を取り直す
-                    current_badges = page.locator("text='募集中'")
-                    if i >= current_badges.count(): break
-                    badge = current_badges.nth(i)
-                    badge.scroll_into_view_if_needed()
+                    badges = page.get_by_text("募集中").all()
+                    if i >= len(badges):
+                        break
+                    badge = badges[i]
+                    badge.scroll_into_view_if_needed() # 要素を画面内に入れる
                     
-                    subject_name = badge.evaluate("""(node) => {
-                        let curr = node.parentElement;
+                    subject_name = badge.evaluate("""(badge) => {
+                        let curr = badge.parentElement;
                         while (curr && curr.tagName !== 'BODY') {
-                            if (curr.classList.contains('roundListSectionGroup') || curr.classList.contains('courseListBody')) break; 
+                            if (curr.classList.contains('roundListSectionGroup') || curr.classList.contains('courseListBody')) {
+                                break; 
+                            }
                             let texts = curr.querySelectorAll('.ellipsisText');
-                            if (texts.length > 0) return texts[0].innerText.trim();
+                            if (texts.length > 0) {
+                                return texts[0].innerText.trim();
+                            }
                             curr = curr.parentElement;
                         }
                         return '';
-                    }""") or f"教科{i+1}"
+                    }""")
+
+                    if not subject_name:
+                        subject_name = f"教科{i+1}"
                     
                     row = badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
                     if row.count() > 0:
-                        row.first.click(force=True)
+                        row.click(force=True)
                     else:
                         badge.click(force=True)
-                    
-                    # 確実な待機：右パネルのマウント完了を待つ
-                    page.wait_for_selector(".focusScope.coursePanel", state="attached", timeout=10000)
-                    
-                    tab = page.locator("text='提出箱'").first
-                    if tab.count() > 0:
-                        tab.click(force=True)
-                        
-                        # 確実な待機：ネットワーク通信が落ち着くのを待つ
-                        page.wait_for_load_state("networkidle")
-                        
-                        # 確実な待機：課題リスト（時間表示）が実際に描画されるまで最大6秒待機（空の提出箱も考慮してエラーは握り潰す）
-                        try:
-                            page.wait_for_selector(".focusScope.coursePanel .submissionCountDownText, .focusScope.coursePanel .submissionStatusText", state="visible", timeout=6000)
-                        except Exception:
-                            pass
-                    
+                    time.sleep(3)
+
+                    tab = page.get_by_text("提出箱")
+                    if tab.count() > 0 and tab.first.is_visible():
+                        tab.first.click(force=True)
+                        time.sleep(2)
+
+                    # 【追加】デバッグ出力の強化：クリック後の状態を保存
+                    print(f"【DEBUG】教科 '{subject_name}' のパネルを開きました。抽出を開始します。")
+                    page.screenshot(path=f"debug_subject_{i}.png")
+
                     tasks_data = page.evaluate("""() => {
                         const results = [];
-                        const seenKeys = new Set();
-                        const deadlines = document.querySelectorAll('.submissionCountDownText, .submissionStatusText');
+                        const seenKeys = new Set(); // 【修正】タイトル単体での除外をやめる
                         
+                        const deadlines = document.querySelectorAll('.submissionCountDownText, .submissionStatusText');
                         deadlines.forEach(dl => {
                             const dlText = dl.innerText.trim();
                             if (!dlText) return;
                             
                             let curr = dl.parentElement;
-                            let title = "宿題"; // デフォルト名
+                            let title = "";
                             
                             while (curr && curr.tagName !== 'BODY') {
                                 const titleNodes = curr.querySelectorAll('.ellipsisText');
@@ -134,60 +71,27 @@ def run():
                                             break;
                                         }
                                     }
-                                    if (title !== "宿題") break;
+                                    if (title) break;
                                 }
                                 curr = curr.parentElement;
                             }
                             
-                            let isSubmitted = curr && (curr.innerText.includes('提出済') || curr.querySelector('.icon-check-green'));
+                            if (!title) title = "宿題";
                             
-                            // 修正箇所：タイトルだけでなく、タイトル＋期限の組み合わせで重複排除を行う
+                            let isSubmitted = false;
+                            if (curr && (curr.innerText.includes('提出済') || curr.querySelector('.icon-check-green'))) {
+                                isSubmitted = true;
+                            }
+
+                            // 【修正】タイトル + 締切日時の組み合わせで一意キーを作る
                             const uniqueKey = title + "_" + dlText;
-                            
+
                             if (!isSubmitted && !seenKeys.has(uniqueKey)) {
                                 seenKeys.add(uniqueKey);
-                                results.push({ title, deadline: dlText });
+                                results.push({ title: title, deadline: dlText });
                             }
                         });
                         return results;
                     }""")
-
-                    for t in tasks_data:
-                        title = t['title']
-                        deadline = t['deadline']
-                        
-                        if any(noise in title for noise in ["のノート", "共有ノート", "タイムライン"]) or title.startswith("2026年"):
-                            continue
-                            
-                        item_id = f"{subject_name}_{title}_{deadline}"
-                        if not any(x["id"] == item_id for x in unsubmitted_items):
-                            unsubmitted_items.append({
-                                "id": item_id,
-                                "subject": subject_name,
-                                "title": title,
-                                "deadline": deadline
-                            })
-
-                except Exception as ex:
-                    print(f"教科 {i} 処理スキップ: {ex}")
-
-        except Exception as err:
-            raise err
-        finally:
-            browser.close()
-
-    # ISO 8601 (JST) 形式での出力へ統一
-    jst = timezone(timedelta(hours=9), 'JST')
-    now_jst = datetime.now(jst)
-    
-    result = {
-        "updated_at": now_jst.isoformat(),
-        "count": len(unsubmitted_items),
-        "items": unsubmitted_items
-    }
-
-    with open("data.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-
-if __name__ == "__main__":
-    run()
+                    
+                    print(f"【DEBUG】'{subject_name}' で抽出されたタスク: {tasks_data}")
