@@ -2,8 +2,9 @@ name: Check Loylo Homework
 
 on:
   schedule:
+    # 日本時間 7:00, 17:00, 20:00 に自動実行
     - cron: '0 22,8,11 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # 手動実行用ボタン
 
 permissions:
   contents: write
@@ -32,19 +33,18 @@ jobs:
           LOILO_PASSWORD: ${{ secrets.LOILO_PASSWORD }}
         run: python scraper.py
 
-      # 【機能追加】エラー時にスクリーンショットをGitHubへアップロード
-      - name: Upload Error Screenshot
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-screenshot
-          path: error_critical.png
-          retention-days: 3
+      # 【機能拡張】実行時のデータを history フォルダへ日時付きでアーカイブ保存
+      - name: Archive snapshot
+        if: success()
+        run: |
+          mkdir -p history
+          TIMESTAMP=$(date +'%Y%m%d_%H%M%S')
+          cp data.json "history/data_${TIMESTAMP}.json"
 
       - name: Commit and Push if updated
         if: success()
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add data.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update homework data" && git push)
+          git add data.json history/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update homework data and archive [skip ci]" && git push)
