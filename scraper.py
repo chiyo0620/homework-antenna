@@ -62,63 +62,51 @@ def run():
             print("送信完了。マイページへの遷移を待機しています...")
             page.wait_for_url("**/_/**", timeout=30000)
             
-            # 【待機戦略】左側の教科リストの親要素がDOMにアタッチされるまで待機
             page.wait_for_selector(".courseListBody", state="attached", timeout=20000)
             time.sleep(3)
             print("✅ マイページが表示されました。データ抽出を開始します。")
 
-            # --- 課題1 & 2: 教科切替と全件網羅ロジック ---
-            badges = page.get_by_text("募集中")
+            badges = page.locator(".courseListStatusV2:has-text('募集中')")
             badge_count = badges.count()
             print(f"📌 「募集中」のバッジを {badge_count} 件検出しました。")
 
             for i in range(badge_count):
                 try:
-                    # 仮想スクロール対策: ループごとにDOMを再評価し、参照切れ（Stale Element）を防止
-                    current_badge = page.get_by_text("募集中").nth(i)
-                    row = current_badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
+                    current_badge = page.locator(".courseListStatusV2:has-text('募集中')").nth(i)
+                    row = current_badge.locator("xpath=ancestor::*[contains(@class, 'courseListItem')][1]")
                     
-                    # 教科名の抽出
                     subject_name = f"教科{i+1}"
-                    subject_el = row.locator(".ellipsisText").first
+                    subject_el = row.locator(".roundListItemBody .ellipsisText").first
                     if subject_el.count() > 0:
                         subject_name = subject_el.inner_text().strip()
                     
                     print(f"➡️ [{i+1}/{badge_count}] 教科「{subject_name}」を処理中...")
                     row.click(force=True)
                     
-                    # 【待機戦略】右パネルのタブが切り替わるまで明示的に待機
-                    page.wait_for_selector("text=提出箱", state="visible", timeout=10000)
+                    page.wait_for_selector(".coursePanel", state="visible", timeout=10000)
                     
-                    tab = page.get_by_text("提出箱")
-                    if tab.count() > 0 and tab.first.is_visible():
-                        tab.first.click(force=True)
+                    tab = page.locator(".courseMenuTab:has-text('提出箱')").first
+                    if tab.count() > 0 and tab.is_visible():
+                        tab.click(force=True)
                     
-                    # SPAの非同期通信によるタスクカード描画を待機
                     time.sleep(2)
                     
-                    # 【課題2解決】タスクパネル内の「すべて」のカード要素を取得
-                    task_cards = page.locator(".focusScope.coursePanel")
+                    task_cards = page.locator("section[aria-label='募集中'] .roundListItem:has(.submissionStatusBadge[data-status='notSubmitted'])")
                     task_count = task_cards.count()
                     seen_titles = set()
                     
                     for j in range(task_count):
                         card = task_cards.nth(j)
                         
-                        # 【フィルタ要件】提出済み・緑チェックマークを除外
-                        if card.locator("text='提出済'").count() > 0 or card.locator(".icon-check-green").count() > 0:
-                            continue
-                            
-                        title_el = card.locator(".ellipsisText").first
+                        title_el = card.locator(".roundListItemBody > .ellipsisText").first
                         title = title_el.inner_text().strip() if title_el.count() > 0 else ""
                         
-                        dl_el = card.locator(".submissionCountDownText, .submissionStatusText").first
+                        dl_el = card.locator(".submissionCountDownText .ellipsisText").first
                         deadline = dl_el.inner_text().strip() if dl_el.count() > 0 else ""
                             
                         if not title or not deadline:
                             continue
                             
-                        # 【フィルタ要件】指定のノイズ文字列を除外
                         if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
                             continue
                             
@@ -148,7 +136,6 @@ def run():
         finally:
             browser.close()
 
-    # index.html の `+ "Z"` 処理に合わせて UTC で現在時刻を生成
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     
     result = {
