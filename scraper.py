@@ -1,7 +1,6 @@
 import os
 import json
 import time
-import hashlib
 from datetime import datetime, timezone
 from playwright.sync_api import sync_playwright
 
@@ -10,6 +9,7 @@ def run():
     user_id = os.environ.get("LOILO_USER_ID")
     password = os.environ.get("LOILO_PASSWORD")
 
+    print("🚀 スクレイパーを起動します...")
     unsubmitted_items = []
 
     with sync_playwright() as p:
@@ -23,7 +23,7 @@ def run():
         page = context.new_page()
 
         try:
-            print("ログインページへアクセスしています...")
+            print("🌐 ログインページへアクセスしています...")
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
@@ -33,9 +33,7 @@ def run():
                 time.sleep(1)
 
             if len(page.query_selector_all("input:not([type='hidden'])")) < 2:
-                btn = page.get_by_text("ロイロノートでログイン", exact=True)
-                if not btn.is_visible():
-                    btn = page.get_by_text("Sign in with LoiLoNote", exact=True)
+                btn = page.get_by_text("ロイロノートでログイン", exact=True) or page.get_by_text("Sign in with LoiLoNote", exact=True)
                 if btn and btn.is_visible():
                     btn.click(force=True)
                     time.sleep(2)
@@ -47,94 +45,112 @@ def run():
                 inputs[1].fill(user_id)
                 inputs[2].fill(password)
             
-            submit_btn = page.locator("button:has-text('ログイン'), input[type='submit'], button").first
-            if submit_btn.count() > 0:
+            submit_btn = page.query_selector("button:has-text('ログイン')") or page.query_selector("input[type='submit']") or page.query_selector("button")
+            if submit_btn:
                 submit_btn.click(force=True)
 
-            print("マイページへの遷移を待機しています...")
+            print("送信完了。マイページへの遷移を待機しています...")
             page.wait_for_url("**/_/**", timeout=30000)
-            
-            page.wait_for_selector(".courseNav .courseListItem", state="visible", timeout=25000)
+            page.wait_for_selector(".courseListBody", state="attached", timeout=20000)
             time.sleep(3)
-            print("マイページが表示されました。")
+            print("✅ マイページが表示されました。データ抽出を開始します。")
 
-            all_courses = page.locator(".courseNav .courseListItem")
-            target_subjects = []
+            # すべての教科要素を取得（仮想DOM対策のため都度再取得する前提）
+            courses_locator = page.locator(".courseListBody .courseListItem")
+            course_count = courses_locator.count()
+            print(f"📌 教科を {course_count} 件検出しました。抽出を開始します。")
 
-            for idx in range(all_courses.count()):
-                c_item = all_courses.nth(idx)
-                if c_item.locator(".courseListStatusV2", has_text="募集中").count() > 0 or c_item.locator(".redBadge").count() > 0:
-                    name_el = c_item.locator(".roundListItemBody .ellipsisText").first
-                    if name_el.count() > 0:
-                        s_name = name_el.inner_text().strip()
-                        if s_name and s_name not in target_subjects:
-                            target_subjects.append(s_name)
-
-            print(f"対象教科: {target_subjects}")
-
-            for s_name in target_subjects:
-                print(f"教科「{s_name}」を処理中...")
-                
-                course_el = page.locator(".courseNav .courseListItem").filter(has_text=s_name).first
-                # PlaywrightのActionability Checkによるタイムアウトを回避するためJS経由で確実なクリックを実行
-                course_el.evaluate("node => node.click()")
-                time.sleep(2)
-
-                tab = page.locator('div[role="tab"]').filter(has_text="提出箱").first
+            for i in range(course_count):
                 try:
-                    tab.wait_for(state="visible", timeout=10000)
-                    tab.evaluate("node => node.click()")
-                except Exception as e:
-                    print(f"提出箱タブの遷移エラー: {e}")
+                    course = page.locator(".courseListBody .courseListItem").nth(i)
+                    course.scroll_into_view_if_needed()
+                    
+                    subject_el = course.locator(".ellipsisText").first
+                    subject_name = subject_el.inner_text().strip() if subject_el.count() > 0 else f"教科{i+1}"
+                    
+                    # 効率化: 赤バッジ（未読）または「募集中」ラベルがある教科のみ探索
+                    has_badge = course.locator(".redBadge").count() > 0
+                    has_recruiting = course.locator(".courseListStatusV2").count() > 0
+                    
+                    if not (has_badge or has_recruiting):
+                        continue
+                        
+                    print(f"➡️ [{i+1}/{course_count}] 教科「{subject_name}」を処理中...")
+                    course.click(force=True)
+                    
+                    # 右パネルの再描画と「提出箱」タブの出現を待機
+                    submission_tab = page.locator('[id$="-submissionBox"]').first
+                    submission_tab.wait_for(state="attached", timeout=10000)
+                    submission_tab.click(force=True)
+                    
+                    # 提出箱の中身（セクション）が描画されるまで待機
+                    try:
+                        page.wait_for_selector('.courseMenuBody .roundListSection', state="attached", timeout=5000)
+                    except:
+                        print(f"   ℹ️ 提出箱が空、または読み込みタイムアウト（スキップ）")
+                        continue
+                        
+                    # セクション（「募集中」「〇月〇日締切」などのブロック）ごとに処理
+                    sections = page.locator('.courseMenuBody .roundListSection')
+                    seen_titles = set()
+                    
+                    for j in range(sections.count()):
+                        section = sections.nth(j)
+                        header_el = section.locator('.roundListSectionHeader').first
+                        header_text = header_el.inner_text().strip() if header_el.count() > 0 else ""
+                        
+                        items = section.locator('.roundListItem')
+                        for k in range(items.count()):
+                            item = items.nth(k)
+                            
+                            # 未提出バッジ（赤の！）があるか属性ベースで判定
+                            if item.locator('[data-status="notSubmitted"]').count() > 0:
+                                title_el = item.locator(".roundListItemBody .ellipsisText").first
+                                title = title_el.inner_text().strip() if title_el.count() > 0 else ""
+                                
+                                # ノイズ除外
+                                if not title or "のノート" in title or "共有ノート" in title or "タイムライン" in title:
+                                    continue
+                                
+                                # 締切のパース: 募集中セクションは個別時刻を持ち、それ以外は見出しが締切日
+                                if "募集中" in header_text:
+                                    dl_el = item.locator(".submissionCountDownText").first
+                                    deadline = dl_el.inner_text().strip() if dl_el.count() > 0 else "指定なし"
+                                else:
+                                    deadline = header_text.replace("締切", "").strip()
+                                
+                                if title not in seen_titles:
+                                    seen_titles.add(title)
+                                    unsubmitted_items.append({
+                                        "id": f"{subject_name}_{title}",
+                                        "subject": subject_name,
+                                        "title": title,
+                                        "deadline": deadline
+                                    })
+                                    print(f"   📥 未提出タスク抽出: {title} (締切: {deadline})")
+                                    
+                except Exception as ex:
+                    print(f"⚠️ 教科 {i+1} の処理中にエラー（スキップします）: {ex}")
                     continue
 
-                time.sleep(2)
-
-                sections = page.locator(".courseMenuBody .roundListSection")
-                for j in range(sections.count()):
-                    section = sections.nth(j)
-                    header_el = section.locator(".roundListSectionHeader").first
-                    section_header = header_el.inner_text().strip() if header_el.count() > 0 else ""
-
-                    unsubmitted_rows = section.locator('.roundListItem:has(.submissionStatusBadge[data-status="notSubmitted"])')
-                    
-                    for k in range(unsubmitted_rows.count()):
-                        row = unsubmitted_rows.nth(k)
-                        title_el = row.locator(".roundListItemBody .ellipsisText").first
-                        title = title_el.inner_text().strip() if title_el.count() > 0 else ""
-
-                        if not title or "のノート" in title or "共有ノート" in title or "タイムライン" in title:
-                            continue
-
-                        dl_el = row.locator(".submissionCountDownText").first
-                        deadline = dl_el.inner_text().strip() if dl_el.count() > 0 else section_header
-
-                        item_id = hashlib.md5(f"{s_name}_{title}_{deadline}".encode()).hexdigest()
-                        unsubmitted_items.append({
-                            "id": item_id,
-                            "subject": s_name,
-                            "title": title,
-                            "deadline": deadline
-                        })
-                        print(f"抽出: {title}")
-
         except Exception as e:
-            print(f"エラーが発生しました: {e}")
+            print(f"❌ 致命的なエラーが発生しました: {e}")
+            raise e
         finally:
             browser.close()
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    unique_items = {item["id"]: item for item in unsubmitted_items}.values()
-    final_items = list(unique_items)
-
+    
     result = {
         "updated_at": now_utc,
-        "count": len(final_items),
-        "items": final_items
+        "count": len(unsubmitted_items),
+        "items": unsubmitted_items
     }
 
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
+        
+    print(f"🎉 処理完了。未提出タスク {len(unsubmitted_items)} 件を data.json に保存しました。")
 
 if __name__ == "__main__":
     run()
