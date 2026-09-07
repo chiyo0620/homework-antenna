@@ -87,31 +87,36 @@ def run():
             for s_name in target_subjects:
                 print(f"➡️ 教科「{s_name}」を処理中...")
                 
-                # 教科名の完全一致でクリック対象を特定
                 course_items = page.locator(".courseNav .courseListItem")
                 for c_idx in range(course_items.count()):
                     item = course_items.nth(c_idx)
                     name_el = item.locator(".roundListItemBody .ellipsisText").first
                     if name_el.count() > 0 and name_el.inner_text().strip() == s_name:
-                        item.click(force=True)
+                        # 確実に発火させるためInner要素をクリック
+                        item.locator(".roundListItemInner").first.click(force=True)
                         break
                 
-                time.sleep(1.5)
+                time.sleep(2)
 
-                # 「提出箱」タブをテキストベースで安全に特定してクリック
-                tab = page.locator('div[role="tab"]').filter(has_text="提出箱").first
-                tab.wait_for(state="visible", timeout=15000)
-                tab.click(force=True)
+                # 提出箱タブを正確なクラス名とテキストで指定
+                tab = page.locator(".courseMenuTab", has_text="提出箱").first
+                try:
+                    tab.wait_for(state="visible", timeout=10000)
+                    tab.click(force=True)
+                except Exception as e:
+                    print(f"   ⚠️ 提出箱タブのクリックに失敗しました: {e}")
+                    continue
 
                 try:
-                    page.wait_for_selector(".coursePanel .roundListSection", state="visible", timeout=10000)
+                    # 右パネルの中身が描画されるまで待機
+                    page.wait_for_selector(".courseMenuBody .roundListSection", state="visible", timeout=10000)
                 except Exception:
                     print("   ⚠️ 提出箱内にセクションが見つかりませんでした。スキップします。")
                     continue
                     
-                time.sleep(1.5)
+                time.sleep(2)
 
-                sections = page.locator(".coursePanel .roundListSection")
+                sections = page.locator(".courseMenuBody .roundListSection")
                 for j in range(sections.count()):
                     section = sections.nth(j)
 
