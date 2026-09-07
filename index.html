@@ -35,7 +35,6 @@
     .section-title.urgent { color: #f87171; }
     .section-title.warning { color: #fbbf24; }
     .section-title.normal { color: #38bdf8; }
-    .section-title.overdue { color: #c084fc; }
 
     .card-grid {
       display: grid;
@@ -62,10 +61,6 @@
     }
     .card.status-normal {
       border-left-color: #3b82f6;
-    }
-    .card.status-overdue {
-      border-left-color: #a855f7;
-      background: #181e29;
     }
 
     @keyframes pulse {
@@ -97,7 +92,6 @@
     .badge-urgent { background: #ef4444; color: #fff; }
     .badge-warning { background: #f59e0b; color: #fff; }
     .badge-normal { background: #3b82f6; color: #fff; }
-    .badge-overdue { background: #a855f7; color: #fff; }
 
     .title {
       font-size: 1.15rem;
@@ -177,7 +171,6 @@
         const res = await fetch('./data.json?t=' + Date.now());
         const data = await res.json();
 
-        // 最終更新日時のJST適用
         const localDate = new Date(data.updated_at);
         const jstString = localDate.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
         document.getElementById('updatedAt').textContent = '最終更新: ' + jstString;
@@ -197,8 +190,6 @@
 
         const now = new Date();
         const tomorrow15 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0, 0);
-        
-        // 【重要】3日後の 23:59:59 に正確に設定
         const threeDaysLater = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3, 23, 59, 59);
         const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
 
@@ -217,7 +208,8 @@
           return { ...item, dateObj: d, category };
         });
 
-        items = items.filter(i => i.dateObj >= thirtyDaysAgo);
+        // 30日以上前の課題を除外し、さらに期限超過（overdue）のタスクをUIから完全削除
+        items = items.filter(i => i.dateObj >= thirtyDaysAgo && i.category !== 'overdue');
 
         if (items.length === 0) {
           container.innerHTML = `
@@ -231,11 +223,11 @@
 
         items.sort((a, b) => a.dateObj - b.dateObj);
 
+        // 期限超過セクションを除外したカテゴリ定義
         const categories = [
           { key: 'urgent', title: '🚨【至急】今日〜明日15時締め切り', class: 'urgent' },
           { key: 'warning', title: '⚠️【注意】締め切り3日前以内', class: 'warning' },
-          { key: 'normal', title: '📘 今後の宿題', class: 'normal' },
-          { key: 'overdue', title: '⏰【期限超過】締め切りを過ぎた宿題', class: 'overdue' }
+          { key: 'normal', title: '📘 今後の宿題', class: 'normal' }
         ];
 
         categories.forEach(cat => {
@@ -258,7 +250,6 @@
             let badgeClass = 'badge-normal';
             if (item.category === 'urgent') { badgeLabel = '至急'; badgeClass = 'badge-urgent'; }
             if (item.category === 'warning') { badgeLabel = '3日前'; badgeClass = 'badge-warning'; }
-            if (item.category === 'overdue') { badgeLabel = '期限切'; badgeClass = 'badge-overdue'; }
 
             card.innerHTML = `
               <div class="card-header">
