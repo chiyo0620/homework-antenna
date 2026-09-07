@@ -63,12 +63,10 @@ def run():
             print("送信完了。マイページへの遷移を待機しています...")
             page.wait_for_url("**/_/**", timeout=30000)
             
-            # 左メニューの教科リストが表示されるまで確実に待機
             page.wait_for_selector(".courseNav .courseListItem", state="visible", timeout=25000)
             time.sleep(2)
             print("✅ マイページが表示されました。対象教科を特定します。")
 
-            # 左メニューの全教科を走査し、「募集中」またはバッジが存在する教科名を抽出
             all_course_items = page.locator(".courseNav .courseListItem")
             target_subjects = []
 
@@ -86,25 +84,33 @@ def run():
 
             print(f"📌 対象教科 ({len(target_subjects)}件): {target_subjects}")
 
-            # 各教科の提出箱を走査
             for s_name in target_subjects:
                 print(f"➡️ 教科「{s_name}」を処理中...")
                 
-                # 教科をクリックして選択
-                course_btn = page.locator(".courseNav .courseListItem").filter(has_text=s_name).first
-                course_btn.click(force=True)
-                time.sleep(1)
-
-                # 「提出箱」タブをクリック
-                tab = page.locator('.coursePanel div[role="tab"]:has(.uiIcon_icon_sb)')
-                tab.wait_for(state="visible", timeout=10000)
-                tab.click(force=True)
-
-                # 右側パネル内のセクション描画を待機
-                page.wait_for_selector(".coursePanel .roundListSection", state="visible", timeout=10000)
+                # 教科名の完全一致でクリック対象を特定
+                course_items = page.locator(".courseNav .courseListItem")
+                for c_idx in range(course_items.count()):
+                    item = course_items.nth(c_idx)
+                    name_el = item.locator(".roundListItemBody .ellipsisText").first
+                    if name_el.count() > 0 and name_el.inner_text().strip() == s_name:
+                        item.click(force=True)
+                        break
+                
                 time.sleep(1.5)
 
-                # 右側パネル（.coursePanel）内に限定して各セクションを走査
+                # 「提出箱」タブをテキストベースで安全に特定してクリック
+                tab = page.locator('div[role="tab"]').filter(has_text="提出箱").first
+                tab.wait_for(state="visible", timeout=15000)
+                tab.click(force=True)
+
+                try:
+                    page.wait_for_selector(".coursePanel .roundListSection", state="visible", timeout=10000)
+                except Exception:
+                    print("   ⚠️ 提出箱内にセクションが見つかりませんでした。スキップします。")
+                    continue
+                    
+                time.sleep(1.5)
+
                 sections = page.locator(".coursePanel .roundListSection")
                 for j in range(sections.count()):
                     section = sections.nth(j)
@@ -112,7 +118,6 @@ def run():
                     header_el = section.locator(".roundListSectionHeader")
                     section_header = header_el.inner_text().strip() if header_el.count() > 0 else ""
 
-                    # 未提出バッジ（data-status="notSubmitted"）を持つ行のみ取得
                     unsubmitted_rows = section.locator('.roundListItem:has(.submissionStatusBadge[data-status="notSubmitted"])')
                     
                     for k in range(unsubmitted_rows.count()):
@@ -124,11 +129,9 @@ def run():
                         if not title:
                             continue
 
-                        # ノイズ行の除外
                         if "のノート" in title or "共有ノート" in title or "タイムライン" in title:
                             continue
 
-                        # 締切日時の取得（募集中の場合は個別表示、期限切れの場合はセクションヘッダーの日付）
                         dl_el = row.locator(".submissionCountDownText")
                         deadline = dl_el.inner_text().strip() if dl_el.count() > 0 else section_header
 
