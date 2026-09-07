@@ -18,7 +18,7 @@ def run():
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         )
         page = context.new_page()
 
@@ -27,114 +27,123 @@ def run():
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
-            warning = page.query_selector("#continue")
-            if warning and warning.is_visible():
+            warning = page.locator("#continue").first
+            if warning.count() > 0 and warning.is_visible():
                 warning.click(force=True)
                 time.sleep(1)
 
-            if len(page.query_selector_all("input:not([type='hidden'])")) < 2:
-                btn = page.get_by_text("ロイロノートでログイン", exact=True) or page.get_by_text("Sign in with LoiLoNote", exact=True)
-                if btn and btn.is_visible():
-                    btn.click(force=True)
-                    time.sleep(2)
+            login_btn = page.locator("text=/ロイロノートでログイン|Sign in with LoiLoNote/i").first
+            if login_btn.count() > 0 and login_btn.is_visible():
+                login_btn.click(force=True)
+                time.sleep(2)
 
-            page.wait_for_selector("input:not([type='hidden'])", timeout=20000)
-            inputs = page.query_selector_all("input:not([type='hidden'])")
-            if len(inputs) >= 3:
-                inputs[0].fill(school_id)
-                inputs[1].fill(user_id)
-                inputs[2].fill(password)
+            page.locator("input[type='password']").wait_for(state="visible", timeout=20000)
+
+            school_input = page.locator("input[placeholder*='学校'], input[name='client_id']").first
+            if school_input.count() == 0:
+                school_input = page.locator("input:not([type='hidden'])").nth(0)
+
+            user_input = page.locator("input[placeholder*='ユーザー'], input[name='username']").first
+            if user_input.count() == 0:
+                user_input = page.locator("input:not([type='hidden'])").nth(1)
+
+            pass_input = page.locator("input[type='password']").first
+
+            school_input.fill(school_id)
+            user_input.fill(user_id)
+            pass_input.fill(password)
             
-            submit_btn = page.query_selector("button:has-text('ログイン')") or page.query_selector("input[type='submit']") or page.query_selector("button")
-            if submit_btn:
+            submit_btn = page.locator("button:has-text('ログイン'), button:has-text('Sign in'), input[type='submit']").first
+            if submit_btn.count() > 0:
                 submit_btn.click(force=True)
 
             print("送信完了。マイページへの遷移を待機しています...")
             page.wait_for_url("**/_/**", timeout=30000)
             page.wait_for_selector(".courseListBody", state="attached", timeout=20000)
             time.sleep(3)
-            print("✅ マイページが表示されました。データ抽出を開始します。")
+            print("✅ マイページが表示されました。全教科のデータ抽出を開始します。")
 
-            # すべての教科要素を取得（仮想DOM対策のため都度再取得する前提）
-            courses_locator = page.locator(".courseListBody .courseListItem")
-            course_count = courses_locator.count()
-            print(f"📌 教科を {course_count} 件検出しました。抽出を開始します。")
+            # 左メニューの全教科アイテムを取得
+            courses = page.locator(".courseListBody .roundListItem.courseListItem")
+            course_count = courses.count()
+            print(f"📌 教科を {course_count} 件検出しました。")
+
+            seen_task_keys = set()
 
             for i in range(course_count):
                 try:
-                    course = page.locator(".courseListBody .courseListItem").nth(i)
+                    course = page.locator(".courseListBody .roundListItem.courseListItem").nth(i)
                     course.scroll_into_view_if_needed()
                     
                     subject_el = course.locator(".ellipsisText").first
                     subject_name = subject_el.inner_text().strip() if subject_el.count() > 0 else f"教科{i+1}"
                     
-                    # 効率化: 赤バッジ（未読）または「募集中」ラベルがある教科のみ探索
-                    has_badge = course.locator(".redBadge").count() > 0
-                    has_recruiting = course.locator(".courseListStatusV2").count() > 0
-                    
-                    if not (has_badge or has_recruiting):
-                        continue
-                        
-                    print(f"➡️ [{i+1}/{course_count}] 教科「{subject_name}」を処理中...")
+                    print(f"➡️ [{i+1}/{course_count}] 教科「{subject_name}」を確認中...")
                     course.click(force=True)
                     
-                    # 右パネルの再描画と「提出箱」タブの出現を待機
-                    submission_tab = page.locator('[id$="-submissionBox"]').first
+                    # 提出箱タブを取得してクリック
+                    submission_tab = page.locator('div[role="tab"][id$="-submissionBox"]').first
                     submission_tab.wait_for(state="attached", timeout=10000)
                     submission_tab.click(force=True)
                     
-                    # 提出箱の中身（セクション）が描画されるまで待機
-                    try:
-                        page.wait_for_selector('.courseMenuBody .roundListSection', state="attached", timeout=5000)
-                    except:
-                        print(f"   ℹ️ 提出箱が空、または読み込みタイムアウト（スキップ）")
-                        continue
-                        
-                    # セクション（「募集中」「〇月〇日締切」などのブロック）ごとに処理
-                    sections = page.locator('.courseMenuBody .roundListSection')
-                    seen_titles = set()
+                    time.sleep(1.5)
                     
-                    for j in range(sections.count()):
-                        section = sections.nth(j)
+                    sections = page.locator('.courseMenuBody .roundListSection')
+                    sec_count = sections.count()
+                    if sec_count == 0:
+                        continue
+
+                    for s_idx in range(sec_count):
+                        section = sections.nth(s_idx)
                         header_el = section.locator('.roundListSectionHeader').first
-                        header_text = header_el.inner_text().strip() if header_el.count() > 0 else ""
-                        
+                        header_text = header_el.inner_text().strip() if header_el.count() > 0 else "期限不明"
+
                         items = section.locator('.roundListItem')
-                        for k in range(items.count()):
-                            item = items.nth(k)
+                        item_count = items.count()
+
+                        for it_idx in range(item_count):
+                            item = items.nth(it_idx)
+
+                            # 「未提出」の赤アイコン（data-status="notSubmitted"）があるか厳密に判定
+                            not_submitted_badge = item.locator('.submissionStatusBadge[data-status="notSubmitted"]')
+                            if not_submitted_badge.count() == 0:
+                                continue
+
+                            title_el = item.locator(".roundListItemBody .ellipsisText").first
+                            title = title_el.inner_text().strip() if title_el.count() > 0 else ""
                             
-                            # 未提出バッジ（赤の！）があるか属性ベースで判定
-                            if item.locator('[data-status="notSubmitted"]').count() > 0:
-                                title_el = item.locator(".roundListItemBody .ellipsisText").first
-                                title = title_el.inner_text().strip() if title_el.count() > 0 else ""
-                                
-                                # ノイズ除外
-                                if not title or "のノート" in title or "共有ノート" in title or "タイムライン" in title:
-                                    continue
-                                
-                                # 締切のパース: 募集中セクションは個別時刻を持ち、それ以外は見出しが締切日
-                                if "募集中" in header_text:
-                                    dl_el = item.locator(".submissionCountDownText").first
-                                    deadline = dl_el.inner_text().strip() if dl_el.count() > 0 else "指定なし"
-                                else:
-                                    deadline = header_text.replace("締切", "").strip()
-                                
-                                if title not in seen_titles:
-                                    seen_titles.add(title)
-                                    unsubmitted_items.append({
-                                        "id": f"{subject_name}_{title}",
-                                        "subject": subject_name,
-                                        "title": title,
-                                        "deadline": deadline
-                                    })
-                                    print(f"   📥 未提出タスク抽出: {title} (締切: {deadline})")
-                                    
+                            # 単純なノイズのみ除外（2026年などの日付タイトルは許容する）
+                            if not title or "のノート" in title or "共有ノート" in title or "タイムライン" in title:
+                                continue
+
+                            # 締切日時の取得
+                            count_down_el = item.locator(".submissionCountDownText").first
+                            if count_down_el.count() > 0 and count_down_el.inner_text().strip():
+                                deadline = count_down_el.inner_text().strip()
+                            else:
+                                deadline = header_text.replace("締切", "").strip()
+
+                            task_key = f"{subject_name}_{title}_{deadline}"
+                            if task_key not in seen_task_keys:
+                                seen_task_keys.add(task_key)
+                                unsubmitted_items.append({
+                                    "id": f"{subject_name}_{title}",
+                                    "subject": subject_name,
+                                    "title": title,
+                                    "deadline": deadline
+                                })
+                                print(f"   📥 [未提出検出] {subject_name} | {title} (締切: {deadline})")
+
                 except Exception as ex:
-                    print(f"⚠️ 教科 {i+1} の処理中にエラー（スキップします）: {ex}")
+                    print(f"   ⚠️ 教科「{subject_name}」の処理中にスキップ: {ex}")
                     continue
 
         except Exception as e:
             print(f"❌ 致命的なエラーが発生しました: {e}")
+            try:
+                page.screenshot(path="error_critical.png")
+            except:
+                pass
             raise e
         finally:
             browser.close()
