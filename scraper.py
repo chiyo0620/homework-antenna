@@ -4,17 +4,17 @@ import time
 from datetime import datetime, timezone, timedelta
 from playwright.sync_api import sync_playwright
 
-# API通信キャプチャ用のグローバル変数
+# 通信キャプチャ用のグローバル変数
 CAPTURED_API_DATA = {}
 
 def handle_response(response):
-    """裏側で走るXHR/Fetch通信（JSON）をすべてフックして取得する"""
+    """裏側で走るAPI通信（JSON）をフックして取得する"""
     try:
         if response.request.resource_type in ["xhr", "fetch"]:
             content_type = response.headers.get("content-type", "")
             if "application/json" in content_type:
                 url = response.url
-                # 分析・トラッキング系の不要な通信を除外
+                # 解析に不要なログ通信などを除外
                 if "analytics" not in url and "log" not in url:
                     CAPTURED_API_DATA[url] = response.json()
     except Exception:
@@ -35,11 +35,11 @@ def run():
         )
         page = context.new_page()
         
-        # レスポンス監視のフックを設定
+        # レスポンス監視を開始
         page.on("response", handle_response)
 
         try:
-            print("【DEBUG】ログイン画面へアクセス中...")
+            print("【DEBUG】ログイン中...")
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
@@ -78,16 +78,16 @@ def run():
             if submit_btn:
                 submit_btn.click(force=True)
 
-            print("【DEBUG】ログイン実行、メイン画面待機中...")
+            print("【DEBUG】メイン画面待機中...")
             page.wait_for_url("**/_/**", timeout=30000)
             time.sleep(5)
 
-            # 各教科を巡回してAPI通信を強制的に発生させる
+            # API通信を発生させるためだけのダミースクロールとクリック
             page.mouse.wheel(0, 1500)
             time.sleep(2)
 
             recruiting_badges = page.get_by_text("募集中").all()
-            print(f"【DEBUG】検知された「募集中」バッジの総数: {len(recruiting_badges)}")
+            print(f"【DEBUG】クリック対象のバッジ総数: {len(recruiting_badges)}")
 
             for i in range(len(recruiting_badges)):
                 try:
@@ -112,7 +112,7 @@ def run():
                         time.sleep(2)
 
                 except Exception as ex:
-                    print(f"【ERROR】教科 {i} 巡回スキップ: {ex}")
+                    print(f"【ERROR】教科 {i} クリック処理スキップ: {ex}")
 
         except Exception as err:
             print(f"【ERROR】致命的なエラー: {err}")
@@ -120,12 +120,12 @@ def run():
         finally:
             browser.close()
 
-    # キャプチャしたAPIレスポンスをルートに保存
+    # フックしたAPIデータを保存（構造調査用）
     with open("api_debug.json", "w", encoding="utf-8") as f:
         json.dump(CAPTURED_API_DATA, f, ensure_ascii=False, indent=2)
-    print("【DEBUG】api_debug.json をルートディレクトリに保存しました。")
+    print("【DEBUG】api_debug.json を保存しました。")
 
-    # 既存の data.json を壊さないための安全なタイムスタンプ更新
+    # 既存のデータは壊さずにタイムスタンプだけ更新
     try:
         with open("data.json", "r", encoding="utf-8") as f:
             old_data = json.load(f)
