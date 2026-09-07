@@ -18,7 +18,7 @@ def run():
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         )
         page = context.new_page()
 
@@ -27,110 +27,120 @@ def run():
             page.goto("https://loilonote.app/login", wait_until="networkidle")
             time.sleep(2)
 
-            warning = page.query_selector("#continue")
-            if warning and warning.is_visible():
+            warning = page.locator("#continue").first
+            if warning.count() > 0 and warning.is_visible():
                 warning.click(force=True)
                 time.sleep(1)
 
-            if len(page.query_selector_all("input:not([type='hidden'])")) < 2:
-                btn = page.get_by_text("ロイロノートでログイン", exact=True)
-                if not btn or not btn.is_visible():
-                    btn = page.get_by_text("Sign in with LoiLoNote", exact=True)
-                if btn and btn.is_visible():
-                    btn.click(force=True)
-                    time.sleep(2)
+            # 英語（CI環境）と日本語の両方に対応する正規表現ボタンクリック
+            login_btn = page.locator("text=/ロイロノートでログイン|Sign in with LoiLoNote/i").first
+            if login_btn.count() > 0 and login_btn.is_visible():
+                login_btn.click(force=True)
+                time.sleep(2)
 
-            page.wait_for_selector("input:not([type='hidden'])", timeout=20000)
-            inputs = page.query_selector_all("input:not([type='hidden'])")
-            if len(inputs) >= 3:
-                inputs[0].fill(school_id)
-                inputs[1].fill(user_id)
-                inputs[2].fill(password)
+            # パスワード入力欄が表示されるまで待機（汎用的な input ではなく type 属性で一意に待機）
+            page.locator("input[type='password']").wait_for(state="visible", timeout=20000)
+
+            # LocatorAPIを使用した堅牢な入力欄の取得
+            school_input = page.locator("input[placeholder*='学校'], input[name='client_id']").first
+            if school_input.count() == 0:
+                school_input = page.locator("input:not([type='hidden'])").nth(0)
+
+            user_input = page.locator("input[placeholder*='ユーザー'], input[name='username']").first
+            if user_input.count() == 0:
+                user_input = page.locator("input:not([type='hidden'])").nth(1)
+
+            pass_input = page.locator("input[type='password']").first
+
+            school_input.fill(school_id)
+            user_input.fill(user_id)
+            pass_input.fill(password)
             
-            submit_btn = (
-                page.query_selector("button:has-text('ログイン')") or 
-                page.query_selector("input[type='submit']") or 
-                page.query_selector("button")
-            )
-            if submit_btn:
+            submit_btn = page.locator("button:has-text('ログイン'), button:has-text('Sign in'), input[type='submit']").first
+            if submit_btn.count() > 0:
                 submit_btn.click(force=True)
 
             print("送信完了。マイページへの遷移を待機しています...")
             page.wait_for_url("**/_/**", timeout=30000)
+            
             page.wait_for_selector(".courseListBody", state="attached", timeout=20000)
             time.sleep(3)
-            print("✅ マイページが表示されました。全教科のデータ抽出を開始します。")
+            print("✅ マイページが表示されました。データ抽出を開始します。")
 
-            courses_locator = page.locator(".courseListBody .courseListItem")
-            course_count = courses_locator.count()
-            print(f"📌 教科を {course_count} 件検出しました。")
+            badges = page.get_by_text("募集中")
+            badge_count = badges.count()
+            print(f"📌 「募集中」のバッジを {badge_count} 件検出しました。")
 
-            for i in range(course_count):
+            for i in range(badge_count):
                 try:
-                    course = page.locator(".courseListBody .courseListItem").nth(i)
-                    course.scroll_into_view_if_needed()
+                    current_badge = page.get_by_text("募集中").nth(i)
+                    row = current_badge.locator("xpath=ancestor::*[contains(@class, 'courseListRow') or self::li][1]")
                     
-                    subject_el = course.locator(".ellipsisText").first
-                    subject_name = subject_el.inner_text().strip() if subject_el.count() > 0 else f"教科{i+1}"
+                    subject_name = f"教科{i+1}"
+                    subject_el = row.locator(".ellipsisText").first
+                    if subject_el.count() > 0:
+                        subject_name = subject_el.inner_text().strip()
                     
-                    print(f"➡️ [{i+1}/{course_count}] 教科「{subject_name}」を処理中...")
-                    course.click(force=True)
+                    print(f"➡️ [{i+1}/{badge_count}] 教科「{subject_name}」を処理中...")
+                    row.click(force=True)
                     
-                    submission_tab = page.locator('div[role="tab"][id$="-submissionBox"]').first
-                    submission_tab.wait_for(state="attached", timeout=10000)
-                    submission_tab.click(force=True)
+                    page.wait_for_selector("text=提出箱", state="visible", timeout=10000)
+                    
+                    tab = page.get_by_text("提出箱")
+                    if tab.count() > 0 and tab.first.is_visible():
+                        tab.first.click(force=True)
                     
                     time.sleep(2)
                     
-                    if page.locator('.courseMenuBody .roundListSection').count() == 0:
-                        continue
-                        
-                    sections = page.locator('.courseMenuBody .roundListSection')
+                    task_cards = page.locator(".focusScope.coursePanel")
+                    task_count = task_cards.count()
                     seen_titles = set()
                     
-                    for j in range(sections.count()):
-                        section = sections.nth(j)
-                        header_el = section.locator('.roundListSectionHeader').first
-                        header_text = header_el.inner_text().strip() if header_el.count() > 0 else "期限不明"
+                    for j in range(task_count):
+                        card = task_cards.nth(j)
                         
-                        items = section.locator('.roundListItem')
-                        for k in range(items.count()):
-                            item = items.nth(k)
+                        if card.locator("text='提出済'").count() > 0 or card.locator(".icon-check-green").count() > 0:
+                            continue
                             
-                            if item.locator('[data-status="notSubmitted"]').count() > 0:
-                                title_el = item.locator(".roundListItemBody .ellipsisText").first
-                                title = title_el.inner_text().strip() if title_el.count() > 0 else "無題の課題"
-                                
-                                if not title or "のノート" in title or "共有ノート" in title or "タイムライン" in title:
-                                    continue
-                                
-                                dl_el = item.locator(".submissionCountDownText").first
-                                if dl_el.count() > 0:
-                                    deadline = dl_el.inner_text().strip()
-                                else:
-                                    deadline = header_text.replace("締切", "").strip()
-                                
-                                if title not in seen_titles:
-                                    seen_titles.add(title)
-                                    unsubmitted_items.append({
-                                        "id": f"{subject_name}_{title}",
-                                        "subject": subject_name,
-                                        "title": title,
-                                        "deadline": deadline
-                                    })
-                                    print(f"   📥 未提出タスク抽出: {title} (締切: {deadline})")
-                                    
+                        title_el = card.locator(".ellipsisText").first
+                        title = title_el.inner_text().strip() if title_el.count() > 0 else ""
+                        
+                        dl_el = card.locator(".submissionCountDownText, .submissionStatusText").first
+                        deadline = dl_el.inner_text().strip() if dl_el.count() > 0 else ""
+                            
+                        if not title or not deadline:
+                            continue
+                            
+                        if "のノート" in title or title.startswith("2026年") or "共有ノート" in title or "タイムライン" in title:
+                            continue
+                            
+                        if title not in seen_titles:
+                            seen_titles.add(title)
+                            item_id = f"{subject_name}_{title}"
+                            
+                            unsubmitted_items.append({
+                                "id": item_id,
+                                "subject": subject_name,
+                                "title": title,
+                                "deadline": deadline
+                            })
+                            print(f"   📥 タスク抽出: {title}")
+                            
                 except Exception as ex:
                     print(f"⚠️ 教科 {i+1} の処理中にエラー（スキップします）: {ex}")
                     continue
 
         except Exception as e:
             print(f"❌ 致命的なエラーが発生しました: {e}")
+            try:
+                page.screenshot(path="error_critical.png")
+            except:
+                pass
             raise e
         finally:
             browser.close()
 
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     
     result = {
         "updated_at": now_utc,
