@@ -2,9 +2,8 @@ name: Check Loylo Homework
 
 on:
   schedule:
-    # 日本時間 7:00, 17:00, 20:00 に自動実行
     - cron: '0 22,8,11 * * *'
-  workflow_dispatch: # 手動実行用ボタン
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -33,7 +32,17 @@ jobs:
           LOILO_PASSWORD: ${{ secrets.LOILO_PASSWORD }}
         run: python scraper.py
 
+      # 【機能追加】エラー時にスクリーンショットをGitHubへアップロード
+      - name: Upload Error Screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshot
+          path: error_critical.png
+          retention-days: 3
+
       - name: Commit and Push if updated
+        if: success()
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
