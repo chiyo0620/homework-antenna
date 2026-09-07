@@ -35,6 +35,7 @@
     .section-title.urgent { color: #f87171; }
     .section-title.warning { color: #fbbf24; }
     .section-title.normal { color: #38bdf8; }
+    .section-title.overdue { color: #c084fc; }
 
     .card-grid {
       display: grid;
@@ -48,6 +49,7 @@
       padding: 1.2rem;
       border-left: 6px solid #64748b;
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+      position: relative;
     }
 
     .card.status-urgent {
@@ -62,6 +64,10 @@
     .card.status-normal {
       border-left-color: #3b82f6;
     }
+    .card.status-overdue {
+      border-left-color: #a855f7;
+      background: #181e29;
+    }
 
     @keyframes pulse {
       0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
@@ -74,6 +80,11 @@
       justify-content: space-between;
       align-items: center;
       margin-bottom: 0.6rem;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .subject-badge {
       background: #334155;
@@ -92,6 +103,24 @@
     .badge-urgent { background: #ef4444; color: #fff; }
     .badge-warning { background: #f59e0b; color: #fff; }
     .badge-normal { background: #3b82f6; color: #fff; }
+    .badge-overdue { background: #a855f7; color: #fff; }
+
+    /* 削除ボタンのスタイル */
+    .delete-btn {
+      background: transparent;
+      color: #94a3b8;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .delete-btn:hover {
+      background: #ef4444;
+      color: white;
+      border-color: #ef4444;
+    }
 
     .title {
       font-size: 1.15rem;
@@ -117,6 +146,28 @@
     }
     .clear-message h2 { font-size: 2.5rem; color: #4ade80; margin-bottom: 1rem; }
     .clear-message p { font-size: 1.2rem; color: #94a3b8; }
+
+    /* リセットエリアのスタイル */
+    .reset-area {
+      text-align: center;
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid #334155;
+    }
+    .reset-btn {
+      background: #1e293b;
+      color: #cbd5e1;
+      border: 1px solid #334155;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .reset-btn:hover {
+      background: #334155;
+      color: #f8fafc;
+    }
   </style>
 </head>
 <body>
@@ -128,7 +179,35 @@
 
   <main id="container"></main>
 
+  <div class="reset-area" id="resetArea" style="display: none;">
+    <button class="reset-btn" onclick="clearHiddenTasks()">🗑 削除した課題の非表示をリセット</button>
+  </div>
+
   <script>
+    // 削除（非表示）されたタスクのIDリストを取得する
+    function getHiddenTasks() {
+      return JSON.parse(localStorage.getItem('hiddenTasks') || '[]');
+    }
+
+    // タスクを削除（非表示）リストに追加して画面を再描画する
+    window.hideTask = function(btnElement) {
+      const taskId = btnElement.getAttribute('data-id');
+      const hidden = getHiddenTasks();
+      if (!hidden.includes(taskId)) {
+        hidden.push(taskId);
+        localStorage.setItem('hiddenTasks', JSON.stringify(hidden));
+        loadHomework(); // 即座に再描画
+      }
+    };
+
+    // 非表示リストをすべてクリアする
+    window.clearHiddenTasks = function() {
+      if (confirm('削除（非表示）にした課題をすべて元に戻しますか？')) {
+        localStorage.removeItem('hiddenTasks');
+        loadHomework();
+      }
+    };
+
     function parseDeadline(str) {
       if (!str) return new Date(8640000000000000);
       const now = new Date();
@@ -185,9 +264,11 @@
               <p>現在、未提出の課題はありません。</p>
             </div>
           `;
+          document.getElementById('resetArea').style.display = 'none';
           return;
         }
 
+        const hiddenTasks = getHiddenTasks();
         const now = new Date();
         const tomorrow15 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0, 0);
         const threeDaysLater = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3, 23, 59, 59);
@@ -208,8 +289,11 @@
           return { ...item, dateObj: d, category };
         });
 
-        // 30日以上前の課題を除外し、さらに期限超過（overdue）のタスクをUIから完全削除
-        items = items.filter(i => i.dateObj >= thirtyDaysAgo && i.category !== 'overdue');
+        // 30日以上前の課題を除外 ＆ 非表示（削除）リストに登録されているIDを除外
+        items = items.filter(i => i.dateObj >= thirtyDaysAgo && !hiddenTasks.includes(i.id));
+
+        // 非表示タスクが存在する場合のみリセットボタンを表示
+        document.getElementById('resetArea').style.display = hiddenTasks.length > 0 ? 'block' : 'none';
 
         if (items.length === 0) {
           container.innerHTML = `
@@ -223,11 +307,11 @@
 
         items.sort((a, b) => a.dateObj - b.dateObj);
 
-        // 期限超過セクションを除外したカテゴリ定義
         const categories = [
           { key: 'urgent', title: '🚨【至急】今日〜明日15時締め切り', class: 'urgent' },
           { key: 'warning', title: '⚠️【注意】締め切り3日前以内', class: 'warning' },
-          { key: 'normal', title: '📘 今後の宿題', class: 'normal' }
+          { key: 'normal', title: '📘 今後の宿題', class: 'normal' },
+          { key: 'overdue', title: '⏰【期限超過】締め切りを過ぎた宿題', class: 'overdue' }
         ];
 
         categories.forEach(cat => {
@@ -250,11 +334,21 @@
             let badgeClass = 'badge-normal';
             if (item.category === 'urgent') { badgeLabel = '至急'; badgeClass = 'badge-urgent'; }
             if (item.category === 'warning') { badgeLabel = '3日前'; badgeClass = 'badge-warning'; }
+            if (item.category === 'overdue') { badgeLabel = '期限切'; badgeClass = 'badge-overdue'; }
+
+            // 期限超過のカードのみ削除ボタンを追加するロジック
+            let deleteBtnHtml = '';
+            if (item.category === 'overdue') {
+              deleteBtnHtml = `<button class="delete-btn" data-id="${item.id}" onclick="hideTask(this)">✖ 削除</button>`;
+            }
 
             card.innerHTML = `
               <div class="card-header">
-                <span class="subject-badge">${item.subject}</span>
-                <span class="status-badge ${badgeClass}">${badgeLabel}</span>
+                <div class="header-left">
+                  <span class="subject-badge">${item.subject}</span>
+                  <span class="status-badge ${badgeClass}">${badgeLabel}</span>
+                </div>
+                ${deleteBtnHtml}
               </div>
               <div class="title">${item.title}</div>
               <div class="deadline">🕒 締切: ${item.deadline || '指定なし'}</div>
