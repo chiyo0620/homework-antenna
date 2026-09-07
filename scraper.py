@@ -18,7 +18,7 @@ def run():
             viewport={"width": 1280, "height": 800},
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         )
         page = context.new_page()
 
@@ -37,22 +37,20 @@ def run():
                 login_btn.click(force=True)
                 time.sleep(2)
 
-            page.locator("input[type='password']").wait_for(state="visible", timeout=20000)
+            print("⏳ ログインフォームの表示を待機しています...")
+            # 特定のtype属性に依存せず、最初の入力欄が表示されるまで待機する堅牢な処理
+            page.locator("input:not([type='hidden'])").first.wait_for(state="visible", timeout=20000)
 
-            school_input = page.locator("input[placeholder*='学校'], input[name='client_id']").first
-            if school_input.count() == 0:
-                school_input = page.locator("input:not([type='hidden'])").nth(0)
+            inputs = page.locator("input:not([type='hidden'])")
+            if inputs.count() >= 3:
+                inputs.nth(0).fill(school_id)
+                inputs.nth(1).fill(user_id)
+                inputs.nth(2).fill(password)
+            else:
+                page.locator("input[placeholder*='学校'], input[name='client_id']").first.fill(school_id)
+                page.locator("input[placeholder*='ユーザー'], input[name='username']").first.fill(user_id)
+                page.locator("input[type='password'], input[name='password']").first.fill(password)
 
-            user_input = page.locator("input[placeholder*='ユーザー'], input[name='username']").first
-            if user_input.count() == 0:
-                user_input = page.locator("input:not([type='hidden'])").nth(1)
-
-            pass_input = page.locator("input[type='password']").first
-
-            school_input.fill(school_id)
-            user_input.fill(user_id)
-            pass_input.fill(password)
-            
             submit_btn = page.locator("button:has-text('ログイン'), button:has-text('Sign in'), input[type='submit']").first
             if submit_btn.count() > 0:
                 submit_btn.click(force=True)
@@ -63,7 +61,7 @@ def run():
             time.sleep(3)
             print("✅ マイページが表示されました。全教科のデータ抽出を開始します。")
 
-            # 左メニューの全教科アイテムを取得
+            # 期限切れ課題を拾うため、バッジの有無に関わらず全教科を取得
             courses = page.locator(".courseListBody .roundListItem.courseListItem")
             course_count = courses.count()
             print(f"📌 教科を {course_count} 件検出しました。")
@@ -81,7 +79,6 @@ def run():
                     print(f"➡️ [{i+1}/{course_count}] 教科「{subject_name}」を確認中...")
                     course.click(force=True)
                     
-                    # 提出箱タブを取得してクリック
                     submission_tab = page.locator('div[role="tab"][id$="-submissionBox"]').first
                     submission_tab.wait_for(state="attached", timeout=10000)
                     submission_tab.click(force=True)
@@ -104,7 +101,6 @@ def run():
                         for it_idx in range(item_count):
                             item = items.nth(it_idx)
 
-                            # 「未提出」の赤アイコン（data-status="notSubmitted"）があるか厳密に判定
                             not_submitted_badge = item.locator('.submissionStatusBadge[data-status="notSubmitted"]')
                             if not_submitted_badge.count() == 0:
                                 continue
@@ -112,11 +108,9 @@ def run():
                             title_el = item.locator(".roundListItemBody .ellipsisText").first
                             title = title_el.inner_text().strip() if title_el.count() > 0 else ""
                             
-                            # 単純なノイズのみ除外（2026年などの日付タイトルは許容する）
                             if not title or "のノート" in title or "共有ノート" in title or "タイムライン" in title:
                                 continue
 
-                            # 締切日時の取得
                             count_down_el = item.locator(".submissionCountDownText").first
                             if count_down_el.count() > 0 and count_down_el.inner_text().strip():
                                 deadline = count_down_el.inner_text().strip()
