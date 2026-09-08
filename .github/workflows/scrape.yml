@@ -2,9 +2,9 @@ name: Check Loylo Homework
 
 on:
   schedule:
-    # 混雑回避のため「17分」に設定
-    # 日本時間 07:17 (UTC 22:17), 17:17 (UTC 08:17), 20:17 (UTC 11:17)
-    - cron: '17 22,8,11 * * *'
+    # 日本時間 5:50 (UTC 20:50) と 15:30 (UTC 06:30) に自動実行
+    - cron: '50 20 * * *'
+    - cron: '30 6 * * *'
   workflow_dispatch: # 手動実行用ボタン
 
 permissions:
@@ -34,18 +34,9 @@ jobs:
           LOILO_PASSWORD: ${{ secrets.LOILO_PASSWORD }}
         run: python scraper.py
 
-      # 実行スナップショットを history フォルダへ保存
-      - name: Archive snapshot
-        if: success()
-        run: |
-          mkdir -p history
-          TIMESTAMP=$(date +'%Y%m%d_%H%M%S')
-          cp data.json "history/data_${TIMESTAMP}.json"
-
       - name: Commit and Push if updated
-        if: success()
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add data.json history/
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update homework data and archive [skip ci]" && git push)
+          git add data.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update homework data" && git push)
