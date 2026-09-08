@@ -2,8 +2,9 @@ name: Check Loylo Homework
 
 on:
   schedule:
-    # 日本時間 7:00, 17:00, 20:00 に自動実行
-    - cron: '0 22,8,11 * * *'
+    # 混雑回避のため「17分」に設定
+    # 日本時間 07:17 (UTC 22:17), 17:17 (UTC 08:17), 20:17 (UTC 11:17)
+    - cron: '17 22,8,11 * * *'
   workflow_dispatch: # 手動実行用ボタン
 
 permissions:
@@ -33,7 +34,7 @@ jobs:
           LOILO_PASSWORD: ${{ secrets.LOILO_PASSWORD }}
         run: python scraper.py
 
-      # 【機能拡張】実行時のデータを history フォルダへ日時付きでアーカイブ保存
+      # 実行スナップショットを history フォルダへ保存
       - name: Archive snapshot
         if: success()
         run: |
