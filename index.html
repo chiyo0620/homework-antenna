@@ -105,7 +105,7 @@
     .badge-normal { background: #3b82f6; color: #fff; }
     .badge-overdue { background: #a855f7; color: #fff; }
 
-    /* 削除ボタンのスタイル */
+    /* 期限超過カード専用の削除ボタン */
     .delete-btn {
       background: transparent;
       color: #94a3b8;
@@ -147,7 +147,7 @@
     .clear-message h2 { font-size: 2.5rem; color: #4ade80; margin-bottom: 1rem; }
     .clear-message p { font-size: 1.2rem; color: #94a3b8; }
 
-    /* リセットエリアのスタイル */
+    /* 非表示解除ボタンのスタイル */
     .reset-area {
       text-align: center;
       margin-top: 3rem;
@@ -184,23 +184,20 @@
   </div>
 
   <script>
-    // 削除（非表示）されたタスクのIDリストを取得する
     function getHiddenTasks() {
       return JSON.parse(localStorage.getItem('hiddenTasks') || '[]');
     }
 
-    // タスクを削除（非表示）リストに追加して画面を再描画する
     window.hideTask = function(btnElement) {
       const taskId = btnElement.getAttribute('data-id');
       const hidden = getHiddenTasks();
       if (!hidden.includes(taskId)) {
         hidden.push(taskId);
         localStorage.setItem('hiddenTasks', JSON.stringify(hidden));
-        loadHomework(); // 即座に再描画
+        loadHomework();
       }
     };
 
-    // 非表示リストをすべてクリアする
     window.clearHiddenTasks = function() {
       if (confirm('削除（非表示）にした課題をすべて元に戻しますか？')) {
         localStorage.removeItem('hiddenTasks');
@@ -289,10 +286,9 @@
           return { ...item, dateObj: d, category };
         });
 
-        // 30日以上前の課題を除外 ＆ 非表示（削除）リストに登録されているIDを除外
+        // 30日以上前の課題を除外 ＆ 非表示にしたIDを除外
         items = items.filter(i => i.dateObj >= thirtyDaysAgo && !hiddenTasks.includes(i.id));
 
-        // 非表示タスクが存在する場合のみリセットボタンを表示
         document.getElementById('resetArea').style.display = hiddenTasks.length > 0 ? 'block' : 'none';
 
         if (items.length === 0) {
@@ -336,7 +332,6 @@
             if (item.category === 'warning') { badgeLabel = '3日前'; badgeClass = 'badge-warning'; }
             if (item.category === 'overdue') { badgeLabel = '期限切'; badgeClass = 'badge-overdue'; }
 
-            // 期限超過のカードのみ削除ボタンを追加するロジック
             let deleteBtnHtml = '';
             if (item.category === 'overdue') {
               deleteBtnHtml = `<button class="delete-btn" data-id="${item.id}" onclick="hideTask(this)">✖ 削除</button>`;
