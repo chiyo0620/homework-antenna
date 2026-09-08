@@ -38,7 +38,6 @@ def run():
                 time.sleep(2)
 
             print("⏳ ログインフォームの表示を待機しています...")
-            # 特定のtype属性に依存せず、最初の入力欄が表示されるまで待機する堅牢な処理
             page.locator("input:not([type='hidden'])").first.wait_for(state="visible", timeout=20000)
 
             inputs = page.locator("input:not([type='hidden'])")
@@ -61,7 +60,7 @@ def run():
             time.sleep(3)
             print("✅ マイページが表示されました。全教科のデータ抽出を開始します。")
 
-            # 期限切れ課題を拾うため、バッジの有無に関わらず全教科を取得
+            # バッジの有無に関わらず全教科を取得
             courses = page.locator(".courseListBody .roundListItem.courseListItem")
             course_count = courses.count()
             print(f"📌 教科を {course_count} 件検出しました。")
@@ -142,7 +141,7 @@ def run():
         finally:
             browser.close()
 
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     
     result = {
         "updated_at": now_utc,
